@@ -971,11 +971,13 @@ private final class PlayerController: ObservableObject {
     @Published var volume: Double = 1
 
     private var timeObserver: Any?
+    private var volumeObservation: NSKeyValueObservation?
 
     init(url: URL) {
         player = AVPlayer(url: url)
         player.volume = 1
         player.isMuted = false
+        observeSystemVolume()
         addTimeObserver()
     }
 
@@ -995,7 +997,7 @@ private final class PlayerController: ObservableObject {
 
     func play() {
         player.isMuted = false
-        player.volume = Float(volume)
+        player.volume = 1
         player.play()
         isPlaying = true
     }
@@ -1013,13 +1015,6 @@ private final class PlayerController: ObservableObject {
         } else {
             play()
         }
-    }
-
-    func setVolume(_ value: Double) {
-        let clamped = min(max(value, 0), 1)
-        volume = clamped
-        player.isMuted = clamped == 0
-        player.volume = Float(clamped)
     }
 
     func pause() {
@@ -1051,6 +1046,17 @@ private final class PlayerController: ObservableObject {
                 if let itemDuration = player.currentItem?.duration.seconds, itemDuration.isFinite, itemDuration > 0 {
                     duration = itemDuration
                 }
+            }
+        }
+    }
+
+    private func observeSystemVolume() {
+        let session = AVAudioSession.sharedInstance()
+        volume = Double(session.outputVolume)
+        volumeObservation = session.observe(\.outputVolume, options: [.initial, .new]) { [weak self] session, _ in
+            let systemVolume = Double(session.outputVolume)
+            Task { @MainActor [weak self] in
+                self?.volume = systemVolume
             }
         }
     }
@@ -1200,14 +1206,8 @@ private struct PlayerVolumeControl: View {
                 .font(.system(size: 27, weight: .semibold))
                 .foregroundStyle(.white)
 
-            Slider(
-                value: Binding(
-                    get: { controller.volume },
-                    set: { controller.setVolume($0) }
-                ),
-                in: 0...1
-            )
-            .tint(.white)
+            SystemVolumeSlider()
+                .frame(height: 34)
 
             Text("\(Int(controller.volume * 100))")
                 .font(.system(size: 15, weight: .bold))
@@ -1222,6 +1222,31 @@ private struct PlayerVolumeControl: View {
         .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Video volume")
+    }
+}
+
+private struct SystemVolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let volumeView = MPVolumeView(frame: .zero)
+        volumeView.showsRouteButton = false
+        volumeView.showsVolumeSlider = true
+        volumeView.backgroundColor = .clear
+        style(volumeView)
+        return volumeView
+    }
+
+    func updateUIView(_ volumeView: MPVolumeView, context: Context) {
+        volumeView.showsRouteButton = false
+        volumeView.showsVolumeSlider = true
+        style(volumeView)
+    }
+
+    private func style(_ volumeView: MPVolumeView) {
+        for case let slider as UISlider in volumeView.subviews {
+            slider.minimumTrackTintColor = .white
+            slider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.34)
+            slider.thumbTintColor = .white
+        }
     }
 }
 
