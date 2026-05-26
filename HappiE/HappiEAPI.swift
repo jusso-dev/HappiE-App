@@ -1,5 +1,5 @@
 //
-//  HeyloAPI.swift
+//  HappiEAPI.swift
 //  HappiE
 //
 //  Created by Justin Middler on 25/5/2026.

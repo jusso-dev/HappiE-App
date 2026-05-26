@@ -4,7 +4,7 @@
   <img src="HappiE/Assets.xcassets/AppIcon.appiconset/HappiE-AppIcon-1024.png" alt="HappiE app icon" width="128" height="128">
 </p>
 
-HappiE is the SwiftUI iPad client for the Heylo family video library. It signs in to the Heylo API, lets a child pick videos assigned by a parent, and plays videos in a kid-friendly full-screen player.
+HappiE is the SwiftUI iPad client for the HappiE family video library. It signs in to the HappiE API, lets a child pick videos assigned by a parent, and plays videos in a kid-friendly full-screen player.
 
 ## Public Release Status
 
@@ -18,7 +18,7 @@ This Xcode project has been cleaned for public release:
 
 ## Local Setup
 
-1. Start the Heylo backend from the web/API repository:
+1. Start the HappiE backend from the web/API repository:
 
    ```bash
    cp .env.example .env
@@ -38,7 +38,7 @@ The backend must also use LAN-reachable `PUBLIC_API_BASE_URL` and `R2_ENDPOINT` 
 
 ## Current Features
 
-- Parent sign-in against the Heylo API.
+- Parent sign-in against the HappiE API.
 - Child profile selection.
 - Library sync from `POST /devices/:id/sync`.
 - YouTube Kids-style full-screen player chrome.

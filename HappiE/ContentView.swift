@@ -18,7 +18,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            HeyloColor.background
+            HappiEColor.background
                 .ignoresSafeArea()
 
             Group {
@@ -367,11 +367,11 @@ private struct ParentLoginView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("HappiE")
                         .font(.system(size: 64, weight: .black, design: .rounded))
-                        .foregroundStyle(HeyloColor.ink)
+                        .foregroundStyle(HappiEColor.ink)
 
                     Text("Private family videos for little hands.")
                         .font(.system(size: 25, weight: .bold, design: .rounded))
-                        .foregroundStyle(HeyloColor.muted)
+                        .foregroundStyle(HappiEColor.muted)
                 }
 
                 HStack(spacing: 16) {
@@ -385,7 +385,7 @@ private struct ParentLoginView: View {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Parent sign in")
                     .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(HeyloColor.ink)
+                    .foregroundStyle(HappiEColor.ink)
 
                 TextField("Email", text: $email)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
@@ -412,11 +412,11 @@ private struct ParentLoginView: View {
 
                 Text(model.apiBaseText)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HeyloColor.muted)
+                    .foregroundStyle(HappiEColor.muted)
             }
             .padding(28)
             .frame(width: 420)
-            .background(HeyloColor.panel)
+            .background(HappiEColor.panel)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(CardStroke(cornerRadius: 28))
         }
@@ -429,11 +429,11 @@ private struct WelcomeAnimationView: View {
     @State private var isPlaying = false
 
     private let floatingIcons = [
-        FloatingIcon(systemName: "play.fill", color: HeyloColor.accent, x: -340, y: -190, delay: 0.0),
-        FloatingIcon(systemName: "star.fill", color: HeyloColor.sun, x: 310, y: -160, delay: 0.12),
-        FloatingIcon(systemName: "heart.fill", color: HeyloColor.coral, x: -250, y: 175, delay: 0.24),
-        FloatingIcon(systemName: "music.note", color: HeyloColor.sky, x: 260, y: 185, delay: 0.34),
-        FloatingIcon(systemName: "sparkles", color: HeyloColor.sun, x: 0, y: -245, delay: 0.18)
+        FloatingIcon(systemName: "play.fill", color: HappiEColor.accent, x: -340, y: -190, delay: 0.0),
+        FloatingIcon(systemName: "star.fill", color: HappiEColor.sun, x: 310, y: -160, delay: 0.12),
+        FloatingIcon(systemName: "heart.fill", color: HappiEColor.coral, x: -250, y: 175, delay: 0.24),
+        FloatingIcon(systemName: "music.note", color: HappiEColor.sky, x: 260, y: 185, delay: 0.34),
+        FloatingIcon(systemName: "sparkles", color: HappiEColor.sun, x: 0, y: -245, delay: 0.18)
     ]
 
     var body: some View {
@@ -445,12 +445,12 @@ private struct WelcomeAnimationView: View {
             VStack(spacing: 22) {
                 ZStack {
                     Circle()
-                        .fill(HeyloColor.accent.opacity(0.12))
+                        .fill(HappiEColor.accent.opacity(0.12))
                         .frame(width: 254, height: 254)
                         .scaleEffect(isPlaying ? 1.1 : 0.72)
 
                     Circle()
-                        .fill(HeyloColor.sun.opacity(0.18))
+                        .fill(HappiEColor.sun.opacity(0.18))
                         .frame(width: 196, height: 196)
                         .scaleEffect(isPlaying ? 0.96 : 0.64)
 
@@ -462,7 +462,7 @@ private struct WelcomeAnimationView: View {
 
                 Text(message)
                     .font(.system(size: 66, weight: .black, design: .rounded))
-                    .foregroundStyle(HeyloColor.ink)
+                    .foregroundStyle(HappiEColor.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.74)
                     .scaleEffect(isPlaying ? 1 : 0.84)
@@ -471,7 +471,7 @@ private struct WelcomeAnimationView: View {
 
                 Text("Family videos are opening")
                     .font(.system(size: 24, weight: .black, design: .rounded))
-                    .foregroundStyle(HeyloColor.muted)
+                    .foregroundStyle(HappiEColor.muted)
                     .opacity(isPlaying ? 1 : 0)
                     .offset(y: isPlaying ? 0 : 12)
                     .animation(.easeOut(duration: 0.38).delay(0.38), value: isPlaying)
@@ -503,9 +503,9 @@ private struct FloatingIconView: View {
             .font(.system(size: 34, weight: .black))
             .foregroundStyle(icon.color)
             .frame(width: 78, height: 78)
-            .background(HeyloColor.panel)
+            .background(HappiEColor.panel)
             .clipShape(Circle())
-            .overlay(Circle().stroke(HeyloColor.line, lineWidth: 2))
+            .overlay(Circle().stroke(HappiEColor.line, lineWidth: 2))
             .shadow(color: icon.color.opacity(0.18), radius: 14, x: 0, y: 10)
             .scaleEffect(isPlaying ? 1 : 0.22)
             .opacity(isPlaying ? 1 : 0)
@@ -869,7 +869,7 @@ private struct PlayerEndShelf: View {
         HStack(spacing: 14) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 30, weight: .black))
-                .foregroundStyle(HeyloColor.sun)
+                .foregroundStyle(HappiEColor.sun)
 
             Text("\(title) is the only video in this library.")
                 .font(.system(size: 18, weight: .black, design: .rounded))
@@ -913,7 +913,7 @@ private struct SuggestedVideoCard: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             LinearGradient(
-                colors: [video.displayColor.opacity(0.96), video.displayColor.opacity(0.62), HeyloColor.sky.opacity(0.68)],
+                colors: [video.displayColor.opacity(0.96), video.displayColor.opacity(0.62), HappiEColor.sky.opacity(0.68)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -927,13 +927,13 @@ private struct SuggestedVideoCard: View {
                     } else {
                         Image(systemName: video.symbolName)
                             .font(.system(size: 44, weight: .black))
-                            .foregroundStyle(HeyloColor.panel.opacity(0.9))
+                            .foregroundStyle(HappiEColor.panel.opacity(0.9))
                     }
                 }
             } else {
                 Image(systemName: video.symbolName)
                     .font(.system(size: 44, weight: .black))
-                    .foregroundStyle(HeyloColor.panel.opacity(0.9))
+                    .foregroundStyle(HappiEColor.panel.opacity(0.9))
             }
 
             Text(video.durationText)
@@ -956,7 +956,7 @@ private struct SuggestedVideoCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(video.isOfflineReady ? HeyloColor.accent : .clear, lineWidth: 4)
+                .stroke(video.isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 4)
         )
     }
 }
@@ -1236,7 +1236,7 @@ private struct PlayerRoundButton: View {
                 .font(.system(size: 34, weight: .black))
                 .frame(width: 78, height: 78)
         }
-        .buttonStyle(PlayerPillButtonStyle(tint: HeyloColor.panel.opacity(0.94), foreground: HeyloColor.ink))
+        .buttonStyle(PlayerPillButtonStyle(tint: HappiEColor.panel.opacity(0.94), foreground: HappiEColor.ink))
         .accessibilityLabel(label)
     }
 }
@@ -1287,19 +1287,19 @@ private struct ChildPickerView: View {
 
                             Text(child.name)
                                 .font(.system(size: 30, weight: .black, design: .rounded))
-                                .foregroundStyle(HeyloColor.ink)
+                                .foregroundStyle(HappiEColor.ink)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
 
                             Label("\(child.storageQuotaMb / 1024) GB video space", systemImage: "internaldrive.fill")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundStyle(HeyloColor.muted)
+                                .foregroundStyle(HappiEColor.muted)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 250)
-                        .background(HeyloColor.panel)
+                        .background(HappiEColor.panel)
                         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                         .overlay(CardStroke(cornerRadius: 28))
                     }
@@ -1392,13 +1392,13 @@ private struct HeaderBar<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundStyle(HeyloColor.ink)
+                    .foregroundStyle(HappiEColor.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
 
                 Text(subtitle)
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HeyloColor.muted)
+                    .foregroundStyle(HappiEColor.muted)
             }
 
             Spacer()
@@ -1420,17 +1420,17 @@ private struct ContinueWatchingView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Ready to watch")
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundStyle(HeyloColor.accent)
+                    .foregroundStyle(HappiEColor.accent)
 
                 Text(video.title)
                     .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundStyle(HeyloColor.ink)
+                    .foregroundStyle(HappiEColor.ink)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(video.description.isEmpty ? "Family-approved video" : video.description)
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HeyloColor.muted)
+                    .foregroundStyle(HappiEColor.muted)
                     .lineLimit(2)
 
                 HStack(spacing: 14) {
@@ -1446,7 +1446,7 @@ private struct ContinueWatchingView: View {
                 if !model.playbackErrorMessage.isEmpty {
                     Text(model.playbackErrorMessage)
                         .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(HeyloColor.warning)
+                        .foregroundStyle(HappiEColor.warning)
                         .lineLimit(2)
                 }
             }
@@ -1455,7 +1455,7 @@ private struct ContinueWatchingView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, minHeight: 280, alignment: .leading)
-        .background(HeyloColor.panel)
+        .background(HappiEColor.panel)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(CardStroke(cornerRadius: 28))
     }
@@ -1467,10 +1467,10 @@ private struct BigActionRow: View {
 
     var body: some View {
         HStack(spacing: 18) {
-            BigActionButton(title: "Ready", detail: "\(downloadedCount)", icon: "arrow.down.to.line.compact", tint: HeyloColor.accent)
-            BigActionButton(title: "Videos", detail: "\(videoCount)", icon: "play.rectangle.fill", tint: HeyloColor.sky)
-            BigActionButton(title: "New", detail: "Sync", icon: "sparkles", tint: HeyloColor.sun)
-            BigActionButton(title: "Safe", detail: "Parent", icon: "checkmark.shield.fill", tint: HeyloColor.coral)
+            BigActionButton(title: "Ready", detail: "\(downloadedCount)", icon: "arrow.down.to.line.compact", tint: HappiEColor.accent)
+            BigActionButton(title: "Videos", detail: "\(videoCount)", icon: "play.rectangle.fill", tint: HappiEColor.sky)
+            BigActionButton(title: "New", detail: "Sync", icon: "sparkles", tint: HappiEColor.sun)
+            BigActionButton(title: "Safe", detail: "Parent", icon: "checkmark.shield.fill", tint: HappiEColor.coral)
         }
     }
 }
@@ -1492,18 +1492,18 @@ private struct BigActionButton: View {
 
             Text(detail)
                 .font(.system(size: 26, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.ink)
+                .foregroundStyle(HappiEColor.ink)
                 .lineLimit(1)
 
             Text(title)
                 .font(.system(size: 17, weight: .heavy, design: .rounded))
-                .foregroundStyle(HeyloColor.muted)
+                .foregroundStyle(HappiEColor.muted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 166)
-        .background(HeyloColor.panel)
+        .background(HappiEColor.panel)
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(CardStroke(cornerRadius: 26))
     }
@@ -1517,13 +1517,13 @@ private struct SectionTitle: View {
         HStack(alignment: .lastTextBaseline) {
             Text(title)
                 .font(.system(size: 34, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.ink)
+                .foregroundStyle(HappiEColor.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             Text(subtitle)
                 .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(HeyloColor.muted)
+                .foregroundStyle(HappiEColor.muted)
                 .lineLimit(1)
 
             Spacer()
@@ -1548,7 +1548,7 @@ private struct VideoTile: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(video.title)
                         .font(.system(size: 24, weight: .black, design: .rounded))
-                        .foregroundStyle(HeyloColor.ink)
+                        .foregroundStyle(HappiEColor.ink)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -1560,7 +1560,7 @@ private struct VideoTile: View {
                         }
                     }
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(video.isOfflineReady ? HeyloColor.accent : HeyloColor.muted)
+                    .foregroundStyle(video.isOfflineReady ? HappiEColor.accent : HappiEColor.muted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 }
@@ -1568,11 +1568,11 @@ private struct VideoTile: View {
                 .padding(.bottom, 18)
             }
             .frame(maxWidth: .infinity, minHeight: 308, alignment: .topLeading)
-            .background(HeyloColor.panel)
+            .background(HappiEColor.panel)
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(video.isOfflineReady ? HeyloColor.accent : HeyloColor.line, lineWidth: video.isOfflineReady ? 4 : 2)
+                    .stroke(video.isOfflineReady ? HappiEColor.accent : HappiEColor.line, lineWidth: video.isOfflineReady ? 4 : 2)
             )
         }
         .buttonStyle(.plain)
@@ -1594,7 +1594,7 @@ private struct ThumbnailView: View {
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(
-                colors: [video.displayColor.opacity(0.96), video.displayColor.opacity(0.62), HeyloColor.sky.opacity(0.68)],
+                colors: [video.displayColor.opacity(0.96), video.displayColor.opacity(0.62), HappiEColor.sky.opacity(0.68)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -1620,10 +1620,10 @@ private struct ThumbnailView: View {
                 Text(video.durationText)
                     .font(.system(size: 16, weight: .black, design: .rounded))
             }
-            .foregroundStyle(HeyloColor.panel)
+            .foregroundStyle(HappiEColor.panel)
             .padding(.horizontal, 14)
             .frame(height: 42)
-            .background(HeyloColor.ink.opacity(0.72))
+            .background(HappiEColor.ink.opacity(0.72))
             .clipShape(Capsule())
             .padding(14)
 
@@ -1637,7 +1637,7 @@ private struct ThumbnailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(video.isOfflineReady ? HeyloColor.accent : .clear, lineWidth: 5)
+                .stroke(video.isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 5)
         )
     }
 }
@@ -1677,7 +1677,7 @@ private struct OfflineReadyBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, style == .compact ? 9 : 12)
             .frame(height: height)
-            .background(HeyloColor.accent)
+            .background(HappiEColor.accent)
             .clipShape(Capsule())
             .overlay(Capsule().stroke(.white.opacity(0.82), lineWidth: 2))
             .shadow(color: .black.opacity(0.26), radius: 8, x: 0, y: 3)
@@ -1691,7 +1691,7 @@ private struct ThumbnailSymbol: View {
     var body: some View {
         Image(systemName: video.symbolName)
             .font(.system(size: size == .large ? 86 : 68, weight: .heavy))
-            .foregroundStyle(HeyloColor.panel.opacity(0.9))
+            .foregroundStyle(HappiEColor.panel.opacity(0.9))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -1701,20 +1701,20 @@ private struct EmptyLibraryView: View {
         VStack(spacing: 18) {
             Image(systemName: "tray.fill")
                 .font(.system(size: 54, weight: .black))
-                .foregroundStyle(HeyloColor.accent)
+                .foregroundStyle(HappiEColor.accent)
 
             Text("No videos yet")
                 .font(.system(size: 32, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.ink)
+                .foregroundStyle(HappiEColor.ink)
 
             Text("Ask a parent to assign videos from the family admin app.")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(HeyloColor.muted)
+                .foregroundStyle(HappiEColor.muted)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 280)
-        .background(HeyloColor.panel)
+        .background(HappiEColor.panel)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(CardStroke(cornerRadius: 28))
     }
@@ -1729,11 +1729,11 @@ private struct LoadingLibraryView: View {
 
             ProgressView()
                 .controlSize(.large)
-                .tint(HeyloColor.accent)
+                .tint(HappiEColor.accent)
 
             Text(message)
                 .font(.system(size: 28, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.ink)
+                .foregroundStyle(HappiEColor.ink)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1746,15 +1746,15 @@ private struct ParentErrorView: View {
         VStack(spacing: 22) {
             Image(systemName: "lock.shield.fill")
                 .font(.system(size: 76, weight: .black))
-                .foregroundStyle(HeyloColor.warning)
+                .foregroundStyle(HappiEColor.warning)
 
             Text("Parent help needed")
                 .font(.system(size: 42, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.ink)
+                .foregroundStyle(HappiEColor.ink)
 
             Text(model.errorMessage)
                 .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundStyle(HeyloColor.muted)
+                .foregroundStyle(HappiEColor.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 680)
 
@@ -1780,7 +1780,7 @@ private struct ParentErrorView: View {
         }
         .padding(32)
         .frame(maxWidth: 760)
-        .background(HeyloColor.panel)
+        .background(HappiEColor.panel)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .overlay(CardStroke(cornerRadius: 30))
     }
@@ -1792,15 +1792,15 @@ private struct BrandMark: View {
     var body: some View {
         ZStack {
             Circle()
-                .fill(HeyloColor.accent)
+                .fill(HappiEColor.accent)
 
             Image(systemName: "play.fill")
                 .font(.system(size: size * 0.36, weight: .black))
-                .foregroundStyle(HeyloColor.panel)
+                .foregroundStyle(HappiEColor.panel)
                 .offset(x: size * 0.03)
         }
         .frame(width: size, height: size)
-        .shadow(color: HeyloColor.accent.opacity(0.22), radius: 18, x: 0, y: 10)
+        .shadow(color: HappiEColor.accent.opacity(0.22), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -1811,12 +1811,12 @@ private struct TrustBadge: View {
     var body: some View {
         Label(title, systemImage: icon)
             .font(.system(size: 17, weight: .black, design: .rounded))
-            .foregroundStyle(HeyloColor.ink)
+            .foregroundStyle(HappiEColor.ink)
             .padding(.horizontal, 16)
             .frame(height: 48)
-            .background(HeyloColor.panel)
+            .background(HappiEColor.panel)
             .clipShape(Capsule())
-            .overlay(Capsule().stroke(HeyloColor.line, lineWidth: 2))
+            .overlay(Capsule().stroke(HappiEColor.line, lineWidth: 2))
     }
 }
 
@@ -1832,7 +1832,7 @@ private struct AvatarCircle: View {
 
             Text(String(name.prefix(1)).uppercased())
                 .font(.system(size: size * 0.44, weight: .black, design: .rounded))
-                .foregroundStyle(HeyloColor.panel)
+                .foregroundStyle(HappiEColor.panel)
         }
         .frame(width: size, height: size)
     }
@@ -1890,8 +1890,8 @@ private struct PrimaryPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 22, weight: .black, design: .rounded))
-            .foregroundStyle(HeyloColor.panel)
-            .background(configuration.isPressed ? HeyloColor.accent.opacity(0.82) : HeyloColor.accent)
+            .foregroundStyle(HappiEColor.panel)
+            .background(configuration.isPressed ? HappiEColor.accent.opacity(0.82) : HappiEColor.accent)
             .clipShape(Capsule())
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
@@ -1901,10 +1901,10 @@ private struct PrimaryPillButtonStyle: ButtonStyle {
 private struct SecondaryPillButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(HeyloColor.ink)
-            .background(configuration.isPressed ? HeyloColor.line.opacity(0.65) : HeyloColor.panel)
+            .foregroundStyle(HappiEColor.ink)
+            .background(configuration.isPressed ? HappiEColor.line.opacity(0.65) : HappiEColor.panel)
             .clipShape(Capsule())
-            .overlay(Capsule().stroke(HeyloColor.line, lineWidth: 2))
+            .overlay(Capsule().stroke(HappiEColor.line, lineWidth: 2))
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }
@@ -1913,10 +1913,10 @@ private struct SecondaryPillButtonStyle: ButtonStyle {
 private struct IconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(HeyloColor.ink)
-            .background(configuration.isPressed ? HeyloColor.line.opacity(0.65) : HeyloColor.background)
+            .foregroundStyle(HappiEColor.ink)
+            .background(configuration.isPressed ? HappiEColor.line.opacity(0.65) : HappiEColor.background)
             .clipShape(Circle())
-            .overlay(Circle().stroke(HeyloColor.line, lineWidth: 2))
+            .overlay(Circle().stroke(HappiEColor.line, lineWidth: 2))
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }
@@ -1927,25 +1927,25 @@ private struct CardStroke: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .stroke(HeyloColor.line, lineWidth: 2)
+            .stroke(HappiEColor.line, lineWidth: 2)
     }
 }
 
 private extension View {
     func inputPanel() -> some View {
         self
-            .foregroundStyle(HeyloColor.ink)
-            .tint(HeyloColor.accent)
+            .foregroundStyle(HappiEColor.ink)
+            .tint(HappiEColor.accent)
             .colorScheme(.light)
             .padding(.horizontal, 18)
             .frame(height: 64)
-            .background(HeyloColor.background)
+            .background(HappiEColor.background)
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(CardStroke(cornerRadius: 18))
     }
 }
 
-private enum HeyloColor {
+private enum HappiEColor {
     static let background = Color(red: 0.94, green: 0.97, blue: 0.98)
     static let panel = Color(red: 0.99, green: 0.995, blue: 0.99)
     static let ink = Color(red: 0.14, green: 0.20, blue: 0.23)
@@ -1960,7 +1960,7 @@ private enum HeyloColor {
 
 private extension ChildProfile {
     var avatarDisplayColor: Color {
-        let palette = [HeyloColor.accent, HeyloColor.coral, HeyloColor.sky, HeyloColor.sun]
+        let palette = [HappiEColor.accent, HappiEColor.coral, HappiEColor.sky, HappiEColor.sun]
         let index = abs(name.hashValue) % palette.count
         return palette[index]
     }
@@ -2004,7 +2004,7 @@ private extension ManifestVideo {
     }
 
     var displayColor: Color {
-        let palette = [HeyloColor.sky, HeyloColor.accent, HeyloColor.coral, HeyloColor.sun]
+        let palette = [HappiEColor.sky, HappiEColor.accent, HappiEColor.coral, HappiEColor.sun]
         let index = abs(title.hashValue) % palette.count
         return palette[index]
     }
