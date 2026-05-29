@@ -2,7 +2,7 @@
 //  HappiEAPI.swift
 //  HappiE
 //
-//  Created by Justin Middler on 25/5/2026.
+//  Created for HappiE.
 //
 
 import Foundation
@@ -13,7 +13,7 @@ struct APIEnvironment {
 
     let baseURL: URL
 
-    private static var defaultBaseURL: URL {
+    static var defaultBaseURL: URL {
         let configured = Bundle.main.object(forInfoDictionaryKey: "HAPPIE_API_BASE_URL") as? String
         let value = configured.flatMap { value -> String? in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,7 +119,7 @@ struct APIClient {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             if let apiError = try? decoder.decode(APIErrorResponse.self, from: data) {
-                throw APIError.server(apiError.error)
+                throw APIError.server(statusCode: httpResponse.statusCode, message: apiError.error)
             }
             throw APIError.httpStatus(httpResponse.statusCode)
         }
@@ -310,9 +310,18 @@ enum APIError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
     case network(url: URL, message: String)
-    case server(String)
+    case server(statusCode: Int, message: String)
     case transport(url: URL, error: URLError)
     case unexpectedPayload(contentType: String)
+
+    var isAuthenticationFailure: Bool {
+        switch self {
+        case .httpStatus(401), .server(statusCode: 401, message: _):
+            true
+        default:
+            false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -322,7 +331,7 @@ enum APIError: LocalizedError {
             return "The API returned HTTP \(status)."
         case .network(let url, let message):
             return "Could not reach \(url.host ?? url.absoluteString): \(message)"
-        case .server(let message):
+        case .server(_, let message):
             return message
         case .transport(let url, let error):
             return "Could not reach \(url.host ?? url.absoluteString): \(error.localizedDescription) (\(error.code.rawValue))"

@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  HappiE
 //
-//  Created by Justin Middler on 25/5/2026.
+//  Created for HappiE.
 //
 
 import SwiftUI
@@ -15,6 +15,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var model = LibraryViewModel()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var isShowingAPISettings = false
 
     var body: some View {
         ZStack {
@@ -26,7 +27,9 @@ struct ContentView: View {
                 case .welcome:
                     WelcomeAnimationView(message: model.welcomeMessage)
                 case .signedOut:
-                    ParentLoginView(model: model)
+                    ParentLoginView(model: model, onShowSettings: {
+                        isShowingAPISettings = true
+                    })
                 case .loading:
                     LoadingLibraryView(message: model.loadingMessage)
                 case .selectingChild:
@@ -34,7 +37,9 @@ struct ContentView: View {
                 case .ready:
                     LibraryHomeView(model: model, performAppAction: performAppAction(_:))
                 case .failed:
-                    ParentErrorView(model: model)
+                    ParentErrorView(model: model, onShowSettings: {
+                        isShowingAPISettings = true
+                    })
                 }
             }
             .padding(.horizontal, 32)
@@ -63,6 +68,12 @@ struct ContentView: View {
                 model.closePlayer()
             }
         }
+        .sheet(isPresented: $isShowingAPISettings) {
+            APISettingsScreen(model: model) {
+                isShowingAPISettings = false
+            }
+            .presentationDetents([.medium])
+        }
     }
 
     private func performAppAction(_ action: AppAction) {
@@ -71,6 +82,8 @@ struct ContentView: View {
             model.phase = .selectingChild
         case .signOut:
             model.signOut()
+        case .settings:
+            isShowingAPISettings = true
         }
     }
 }
@@ -78,6 +91,7 @@ struct ContentView: View {
 private enum AppAction {
     case switchProfile
     case signOut
+    case settings
 }
 
 @MainActor
@@ -103,14 +117,36 @@ final class LibraryViewModel: ObservableObject {
     @Published var playbackErrorMessage = ""
     @Published var isPreparingPlayback = false
     @Published var manifestExpiresAt: Date?
+    @Published private(set) var apiBaseURL: URL
 
-    let apiBaseText = APIEnvironment.local.baseURL.absoluteString
-
-    private let api = APIClient()
+    private let apiConfigurationStore: APIConfigurationStore
+    private let session: URLSession
     private let authStore = AuthStore()
     private var tokens: StoredTokens?
     private var deviceId: UUID?
     private var hasResumed = false
+
+    init(
+        apiConfigurationStore: APIConfigurationStore? = nil,
+        session: URLSession = .shared
+    ) {
+        let apiConfigurationStore = apiConfigurationStore ?? APIConfigurationStore()
+        self.apiConfigurationStore = apiConfigurationStore
+        self.session = session
+        _apiBaseURL = Published(initialValue: apiConfigurationStore.loadBaseURL())
+    }
+
+    var apiBaseText: String {
+        apiBaseURL.absoluteString
+    }
+
+    var defaultAPIBaseText: String {
+        APIEnvironment.defaultBaseURL.absoluteString
+    }
+
+    private var api: APIClient {
+        APIClient(environment: APIEnvironment(baseURL: apiBaseURL), session: session)
+    }
 
     var featuredVideo: ManifestVideo? {
         videos.first
@@ -149,7 +185,22 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func loadChildren() async {
+    @discardableResult
+    func updateAPIBaseURL(_ text: String) throws -> Bool {
+        let newURL = try APIConfigurationStore.normalizedBaseURL(from: text)
+        guard newURL != apiBaseURL else { return false }
+
+        apiConfigurationStore.saveBaseURL(newURL)
+        return applyAPIBaseURL(newURL)
+    }
+
+    @discardableResult
+    func resetAPIBaseURLToDefault() -> Bool {
+        let newURL = apiConfigurationStore.resetBaseURL()
+        return applyAPIBaseURL(newURL)
+    }
+
+    func loadChildren(allowTokenRefresh: Bool = true) async {
         guard let tokens else {
             phase = .signedOut
             return
@@ -169,15 +220,15 @@ final class LibraryViewModel: ObservableObject {
                 }
             }
         } catch {
-            await refreshThenRetry { [weak self] in
-                await self?.loadChildren()
+            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
+                await self?.loadChildren(allowTokenRefresh: false)
             } onFailure: {
                 fail(error)
             }
         }
     }
 
-    func select(_ child: ChildProfile) async {
+    func select(_ child: ChildProfile, allowTokenRefresh: Bool = true) async {
         guard let tokens else {
             phase = .signedOut
             return
@@ -195,8 +246,8 @@ final class LibraryViewModel: ObservableObject {
             lastSyncedText = "Synced just now"
             phase = .ready
         } catch {
-            await refreshThenRetry { [weak self] in
-                await self?.select(child)
+            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
+                await self?.select(child, allowTokenRefresh: false)
             } onFailure: {
                 fail(error)
             }
@@ -240,7 +291,7 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func play(_ video: ManifestVideo) async {
+    func play(_ video: ManifestVideo, allowTokenRefresh: Bool = true) async {
         guard let tokens else {
             phase = .signedOut
             return
@@ -254,8 +305,8 @@ final class LibraryViewModel: ObservableObject {
             let response = try await api.playbackURL(videoId: video.id, token: tokens.accessToken)
             playbackItem = PlaybackItem(video: video, url: response.url)
         } catch {
-            await refreshThenRetry { [weak self] in
-                await self?.play(video)
+            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
+                await self?.play(video, allowTokenRefresh: false)
             } onFailure: {
                 playbackErrorMessage = error.localizedDescription
             }
@@ -264,7 +315,7 @@ final class LibraryViewModel: ObservableObject {
         isPreparingPlayback = false
     }
 
-    func preparePlaybackItem(for video: ManifestVideo) async -> PlaybackItem? {
+    func preparePlaybackItem(for video: ManifestVideo, allowTokenRefresh: Bool = true) async -> PlaybackItem? {
         guard let tokens else {
             phase = .signedOut
             return nil
@@ -278,8 +329,8 @@ final class LibraryViewModel: ObservableObject {
             return PlaybackItem(video: video, url: response.url)
         } catch {
             var preparedItem: PlaybackItem?
-            await refreshThenRetry { [weak self] in
-                preparedItem = await self?.preparePlaybackItem(for: video)
+            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
+                preparedItem = await self?.preparePlaybackItem(for: video, allowTokenRefresh: false)
             } onFailure: {
                 playbackErrorMessage = error.localizedDescription
             }
@@ -324,8 +375,44 @@ final class LibraryViewModel: ObservableObject {
         phase = .signedOut
     }
 
-    private func refreshThenRetry(_ retry: @escaping () async -> Void, onFailure: () -> Void) async {
-        guard let refreshToken = tokens?.refreshToken else {
+    private func applyAPIBaseURL(_ newURL: URL) -> Bool {
+        guard newURL != apiBaseURL else { return false }
+
+        apiBaseURL = newURL
+        resetSessionForServerChange()
+        return true
+    }
+
+    private func resetSessionForServerChange() {
+        authStore.clear()
+        tokens = nil
+        deviceId = nil
+        selectedChild = nil
+        children = []
+        videos = []
+        playbackItem = nil
+        playbackErrorMessage = ""
+        isPreparingPlayback = false
+        manifestExpiresAt = nil
+        lastSyncedText = "Not synced yet"
+        errorMessage = ""
+
+        if phase != .signedOut && phase != .welcome {
+            phase = .signedOut
+        }
+    }
+
+    private func refreshThenRetry(
+        after error: Error,
+        allowTokenRefresh: Bool,
+        _ retry: @escaping () async -> Void,
+        onFailure: () -> Void
+    ) async {
+        guard
+            allowTokenRefresh,
+            (error as? APIError)?.isAuthenticationFailure == true,
+            let refreshToken = tokens?.refreshToken
+        else {
             onFailure()
             return
         }
@@ -356,8 +443,12 @@ final class LibraryViewModel: ObservableObject {
 
 private struct ParentLoginView: View {
     @ObservedObject var model: LibraryViewModel
+    let onShowSettings: () -> Void
+
     @State private var email = ""
     @State private var password = ""
+    @State private var apiBaseURLText = ""
+    @State private var apiBaseURLError = ""
 
     var body: some View {
         HStack(spacing: 40) {
@@ -383,24 +474,51 @@ private struct ParentLoginView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 20) {
-                Text("Parent sign in")
-                    .font(.system(size: 32, weight: .black, design: .rounded))
-                    .foregroundStyle(HappiEColor.ink)
+                HStack(spacing: 16) {
+                    Text("Parent sign in")
+                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .foregroundStyle(HappiEColor.ink)
+
+                    Spacer()
+
+                    Button("API Settings", systemImage: "gearshape.fill", action: onShowSettings)
+                        .labelStyle(.iconOnly)
+                        .font(.system(size: 24, weight: .black))
+                        .frame(width: 52, height: 52)
+                        .buttonStyle(IconButtonStyle())
+                }
 
                 TextField("Email", text: $email)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .textFieldStyle(.plain)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.emailAddress)
                     .inputPanel()
 
                 SecureField("Password", text: $password)
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                     .textFieldStyle(.plain)
+                    .textContentType(.password)
                     .inputPanel()
 
+                APIBaseURLEditor(
+                    title: "API server",
+                    text: $apiBaseURLText,
+                    currentText: model.apiBaseText,
+                    defaultText: model.defaultAPIBaseText,
+                    errorMessage: apiBaseURLError,
+                    saveTitle: "Use Server",
+                    resetTitle: "Default",
+                    onSave: {
+                        saveAPIBaseURL()
+                    },
+                    onReset: resetAPIBaseURL
+                )
+
                 Button {
-                    Task {
-                        await model.signIn(email: email, password: password)
-                    }
+                    signIn()
                 } label: {
                     Label("Open Library", systemImage: "play.fill")
                         .font(.system(size: 25, weight: .black, design: .rounded))
@@ -408,17 +526,203 @@ private struct ParentLoginView: View {
                         .frame(height: 74)
                 }
                 .buttonStyle(PrimaryPillButtonStyle())
-                .disabled(email.isEmpty || password.isEmpty)
-
-                Text(model.apiBaseText)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HappiEColor.muted)
+                .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
             }
             .padding(28)
             .frame(width: 420)
             .background(HappiEColor.panel)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(CardStroke(cornerRadius: 28))
+        }
+        .onAppear(perform: syncAPIBaseURLText)
+        .onChange(of: model.apiBaseURL) { _, _ in
+            syncAPIBaseURLText()
+        }
+    }
+
+    private func signIn() {
+        guard saveAPIBaseURL() else { return }
+
+        Task {
+            await model.signIn(
+                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                password: password
+            )
+        }
+    }
+
+    @discardableResult
+    private func saveAPIBaseURL() -> Bool {
+        do {
+            try model.updateAPIBaseURL(apiBaseURLText)
+            apiBaseURLText = model.apiBaseText
+            apiBaseURLError = ""
+            return true
+        } catch {
+            apiBaseURLError = error.localizedDescription
+            return false
+        }
+    }
+
+    private func resetAPIBaseURL() {
+        model.resetAPIBaseURLToDefault()
+        syncAPIBaseURLText()
+        apiBaseURLError = ""
+    }
+
+    private func syncAPIBaseURLText() {
+        apiBaseURLText = model.apiBaseText
+    }
+}
+
+private struct APISettingsScreen: View {
+    @ObservedObject var model: LibraryViewModel
+    let onClose: () -> Void
+
+    @State private var apiBaseURLText = ""
+    @State private var apiBaseURLError = ""
+
+    var body: some View {
+        ZStack {
+            HappiEColor.background
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Settings")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .foregroundStyle(HappiEColor.ink)
+
+                        Text("Changing servers signs out this device.")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(HappiEColor.muted)
+                    }
+
+                    Spacer()
+
+                    Button("Done", systemImage: "checkmark", action: onClose)
+                        .font(.system(size: 19, weight: .black, design: .rounded))
+                        .padding(.horizontal, 20)
+                        .frame(height: 56)
+                        .buttonStyle(SecondaryPillButtonStyle())
+                }
+
+                APIBaseURLEditor(
+                    title: "API server",
+                    text: $apiBaseURLText,
+                    currentText: model.apiBaseText,
+                    defaultText: model.defaultAPIBaseText,
+                    errorMessage: apiBaseURLError,
+                    saveTitle: "Save Server",
+                    resetTitle: "Reset",
+                    onSave: {
+                        saveAPIBaseURL()
+                    },
+                    onReset: resetAPIBaseURL
+                )
+            }
+            .padding(28)
+            .frame(maxWidth: 620)
+            .background(HappiEColor.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(CardStroke(cornerRadius: 28))
+        }
+        .onAppear(perform: syncAPIBaseURLText)
+        .onChange(of: model.apiBaseURL) { _, _ in
+            syncAPIBaseURLText()
+        }
+    }
+
+    private func saveAPIBaseURL() {
+        do {
+            try model.updateAPIBaseURL(apiBaseURLText)
+            apiBaseURLText = model.apiBaseText
+            apiBaseURLError = ""
+        } catch {
+            apiBaseURLError = error.localizedDescription
+        }
+    }
+
+    private func resetAPIBaseURL() {
+        model.resetAPIBaseURLToDefault()
+        syncAPIBaseURLText()
+        apiBaseURLError = ""
+    }
+
+    private func syncAPIBaseURLText() {
+        apiBaseURLText = model.apiBaseText
+    }
+}
+
+private struct APIBaseURLEditor: View {
+    let title: String
+    @Binding var text: String
+    let currentText: String
+    let defaultText: String
+    let errorMessage: String
+    let saveTitle: String
+    let resetTitle: String
+    let onSave: () -> Void
+    let onReset: () -> Void
+
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasChanges: Bool {
+        trimmedText != currentText
+    }
+
+    private var canReset: Bool {
+        currentText != defaultText || hasChanges
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: "network")
+                .font(.system(size: 17, weight: .black, design: .rounded))
+                .foregroundStyle(HappiEColor.ink)
+
+            TextField("http://localhost:18080", text: $text)
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .textFieldStyle(.plain)
+                .textContentType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .inputPanel()
+
+            HStack(spacing: 10) {
+                Button {
+                    onSave()
+                } label: {
+                    Label(saveTitle, systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .padding(.horizontal, 18)
+                        .frame(height: 52)
+                }
+                .buttonStyle(SecondaryPillButtonStyle())
+                .disabled(trimmedText.isEmpty || !hasChanges)
+
+                Button {
+                    onReset()
+                } label: {
+                    Label(resetTitle, systemImage: "arrow.uturn.backward.circle.fill")
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .padding(.horizontal, 18)
+                        .frame(height: 52)
+                }
+                .buttonStyle(SecondaryPillButtonStyle())
+                .disabled(!canReset)
+            }
+
+            if !errorMessage.isEmpty {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(HappiEColor.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -535,7 +839,10 @@ private struct VideoPlayerScreen: View {
     @State private var controlsVisible = true
     @State private var hideControlsTask: Task<Void, Never>?
     @State private var refreshVideosTask: Task<Void, Never>?
+    @State private var playerRefreshTask: Task<Void, Never>?
     @State private var playbackRecoveryTask: Task<Void, Never>?
+    @State private var videoSwitchTask: Task<Void, Never>?
+    @State private var playbackRequestID = UUID()
     @State private var isSwitchingVideo = false
 
     init(
@@ -600,9 +907,7 @@ private struct VideoPlayerScreen: View {
             scheduleVideoRefresh()
         }
         .onDisappear {
-            hideControlsTask?.cancel()
-            refreshVideosTask?.cancel()
-            playbackRecoveryTask?.cancel()
+            cancelPlayerTasks()
             UIApplication.shared.isIdleTimerDisabled = false
             controller.pause()
         }
@@ -618,13 +923,11 @@ private struct VideoPlayerScreen: View {
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .animation(.easeOut(duration: 0.18), value: controlsVisible)
-        .accessibilityLabel("Playing \(currentItem.video.title)")
+        .accessibilityLabel("Playing \(currentItem.video.displayTitle)")
     }
 
     private func close() {
-        hideControlsTask?.cancel()
-        refreshVideosTask?.cancel()
-        playbackRecoveryTask?.cancel()
+        cancelPlayerTasks()
         controller.pause()
         onClose()
         dismiss()
@@ -634,20 +937,29 @@ private struct VideoPlayerScreen: View {
         guard !isSwitchingVideo else { return }
         isSwitchingVideo = true
         showControls()
+        playbackRecoveryTask?.cancel()
+        playbackRecoveryTask = nil
 
-        Task {
-            guard let nextItem = await onSelectVideo(video) else {
-                await MainActor.run {
-                    isSwitchingVideo = false
-                    scheduleControlsHide()
-                }
-                return
-            }
+        let requestID = UUID()
+        playbackRequestID = requestID
+        videoSwitchTask?.cancel()
+        videoSwitchTask = Task {
+            let nextItem = await onSelectVideo(video)
 
             await MainActor.run {
+                guard playbackRequestID == requestID, !Task.isCancelled else { return }
+
+                guard let nextItem else {
+                    isSwitchingVideo = false
+                    videoSwitchTask = nil
+                    scheduleControlsHide()
+                    return
+                }
+
                 currentItem = nextItem
                 controller.replaceCurrentItem(with: nextItem.url)
                 isSwitchingVideo = false
+                videoSwitchTask = nil
                 refreshPlayerVideos()
                 scheduleControlsHide()
             }
@@ -703,37 +1015,64 @@ private struct VideoPlayerScreen: View {
     }
 
     private func refreshPlayerVideos() {
-        Task {
+        playerRefreshTask?.cancel()
+        playerRefreshTask = Task {
             let refreshedVideos = await onRefreshVideos()
-            guard !Task.isCancelled else { return }
             await MainActor.run {
+                guard !Task.isCancelled else { return }
                 playerVideos = refreshedVideos
+                playerRefreshTask = nil
             }
         }
     }
 
     private func recoverPlaybackIfNeeded(notification: Notification) {
-        guard notification.object as AnyObject? === controller.player.currentItem else { return }
+        guard
+            !isSwitchingVideo,
+            videoSwitchTask == nil,
+            notification.object as AnyObject? === controller.player.currentItem
+        else {
+            return
+        }
         recoverPlayback()
     }
 
     private func recoverPlayback() {
-        guard playbackRecoveryTask == nil else { return }
+        guard playbackRecoveryTask == nil, videoSwitchTask == nil else { return }
         let resumeAt = controller.currentTime
+        let video = currentItem.video
+        let requestID = UUID()
+        playbackRequestID = requestID
         playbackRecoveryTask = Task {
-            guard let refreshedItem = await onSelectVideo(currentItem.video) else {
+            guard let refreshedItem = await onSelectVideo(video) else {
                 await MainActor.run {
-                    playbackRecoveryTask = nil
+                    if playbackRequestID == requestID {
+                        playbackRecoveryTask = nil
+                    }
                 }
                 return
             }
 
             await MainActor.run {
+                guard playbackRequestID == requestID, !Task.isCancelled else { return }
                 currentItem = refreshedItem
                 controller.replaceCurrentItem(with: refreshedItem.url, startAt: resumeAt)
                 playbackRecoveryTask = nil
             }
         }
+    }
+
+    private func cancelPlayerTasks() {
+        hideControlsTask?.cancel()
+        refreshVideosTask?.cancel()
+        playerRefreshTask?.cancel()
+        playbackRecoveryTask?.cancel()
+        videoSwitchTask?.cancel()
+        hideControlsTask = nil
+        refreshVideosTask = nil
+        playerRefreshTask = nil
+        playbackRecoveryTask = nil
+        videoSwitchTask = nil
     }
 }
 
@@ -757,7 +1096,7 @@ private struct PlayerChrome: View {
 
             VStack(spacing: 0) {
                 PlayerTopBar(
-                    title: item.video.title,
+                    title: item.video.displayTitle,
                     duration: item.video.durationText,
                     controller: controller,
                     onClose: onClose
@@ -773,7 +1112,7 @@ private struct PlayerChrome: View {
                     )
 
                     if videos.isEmpty {
-                        PlayerEndShelf(title: item.video.title)
+                        PlayerEndShelf(title: item.video.displayTitle)
                     } else {
                         SuggestedVideoStrip(videos: videos, onSelect: onSelect)
                     }
@@ -900,7 +1239,7 @@ private struct SuggestedVideoStrip: View {
                         SuggestedVideoCard(video: video)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Play \(video.title)")
+                    .accessibilityLabel("Play \(video.displayTitle)")
                 }
             }
         }
@@ -985,6 +1324,7 @@ private final class PlayerController: ObservableObject {
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
+        volumeObservation?.invalidate()
     }
 
     var remainingText: String {
@@ -1005,6 +1345,8 @@ private final class PlayerController: ObservableObject {
     func replaceCurrentItem(with url: URL, startAt seconds: Double = 0) {
         currentTime = max(0, seconds)
         duration = 1
+        isPlaying = false
+        player.pause()
         player.replaceCurrentItem(with: AVPlayerItem(url: url))
         if seconds > 0 {
             player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
@@ -1291,8 +1633,14 @@ private struct ChildPickerView: View {
                     title: "Who is watching?",
                     subtitle: "Choose a parent-approved profile",
                     trailing: {
-                        ParentButton(title: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
-                            performAppAction(.signOut)
+                        HStack(spacing: 12) {
+                            SecondaryIconButton(systemImage: "gearshape.fill", label: "Settings") {
+                                performAppAction(.settings)
+                            }
+
+                            ParentButton(title: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
+                                performAppAction(.signOut)
+                            }
                         }
                     }
                 )
@@ -1347,54 +1695,27 @@ private struct LibraryHomeView: View {
                 title: "Hi, \(model.selectedChild?.name ?? "there")",
                 subtitle: model.lastSyncedText,
                 trailing: {
-                    HStack(spacing: 12) {
-                        if model.children.count > 1 {
-                            ParentButton(title: "Switch", icon: "person.2.fill") {
-                                model.showProfileSwitcher()
-                            }
-                        }
-
-                        ParentButton(title: "Sync", icon: "arrow.clockwise") {
-                            Task {
-                                await model.sync()
-                            }
-                        }
-
-                        ParentButton(title: "Profiles", icon: "person.2.fill") {
-                            performAppAction(.switchProfile)
-                        }
-                    }
+                    ParentControlsMenu(model: model, performAppAction: performAppAction)
                 }
             )
             .padding(.bottom, 20)
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 28) {
-                    if let featuredVideo = model.featuredVideo {
-                        ContinueWatchingView(model: model, video: featuredVideo)
-                    }
+                VStack(alignment: .leading, spacing: 18) {
+                    SectionTitle(title: "Videos", subtitle: "Picked by your family")
 
-                    BigActionRow(
-                        downloadedCount: model.videos.filter { $0.downloadPriority == .required }.count,
-                        videoCount: model.videos.count
-                    )
-
-                    VStack(alignment: .leading, spacing: 18) {
-                        SectionTitle(title: "\(model.selectedChild?.name ?? "Kid")'s videos", subtitle: "Picked by your family")
-
-                        if model.videos.isEmpty {
-                            EmptyLibraryView()
-                        } else {
-                            LazyVGrid(
-                                columns: [
-                                    GridItem(.adaptive(minimum: 300, maximum: 380), spacing: 22)
-                                ],
-                                alignment: .leading,
-                                spacing: 22
-                            ) {
-                                ForEach(model.videos) { video in
-                                    VideoTile(model: model, video: video)
-                                }
+                    if model.videos.isEmpty {
+                        EmptyLibraryView()
+                    } else {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.adaptive(minimum: 300, maximum: 380), spacing: 22)
+                            ],
+                            alignment: .leading,
+                            spacing: 22
+                        ) {
+                            ForEach(model.videos) { video in
+                                VideoTile(model: model, video: video)
                             }
                         }
                     }
@@ -1402,6 +1723,53 @@ private struct LibraryHomeView: View {
                 .padding(.bottom, 36)
             }
         }
+    }
+}
+
+private struct ParentControlsMenu: View {
+    @ObservedObject var model: LibraryViewModel
+    let performAppAction: (AppAction) -> Void
+
+    private var offlineReadyCount: Int {
+        model.videos.filter { $0.downloadPriority == .required }.count
+    }
+
+    var body: some View {
+        Menu {
+            Section("Stats") {
+                Label("^[\(model.videos.count) video](inflect: true)", systemImage: "play.rectangle.fill")
+                Label("\(offlineReadyCount) ready offline", systemImage: "arrow.down.circle.fill")
+                Label(model.lastSyncedText, systemImage: "clock.arrow.circlepath")
+            }
+
+            Section("Controls") {
+                Button("Switch Profile", systemImage: "person.2.fill") {
+                    model.showProfileSwitcher()
+                }
+
+                Button("Sync Library", systemImage: "arrow.clockwise") {
+                    Task {
+                        await model.sync()
+                    }
+                }
+
+                Button("Settings", systemImage: "gearshape.fill") {
+                    performAppAction(.settings)
+                }
+            }
+
+            Section {
+                Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
+                    performAppAction(.signOut)
+                }
+            }
+        } label: {
+            Label("Parent", systemImage: "lock.shield.fill")
+                .font(.system(size: 20, weight: .black, design: .rounded))
+                .padding(.horizontal, 22)
+                .frame(height: 62)
+        }
+        .buttonStyle(SecondaryPillButtonStyle())
     }
 }
 
@@ -1430,107 +1798,6 @@ private struct HeaderBar<Trailing: View>: View {
 
             trailing()
         }
-    }
-}
-
-private struct ContinueWatchingView: View {
-    @ObservedObject var model: LibraryViewModel
-    let video: ManifestVideo
-
-    var body: some View {
-        HStack(spacing: 26) {
-            ThumbnailView(video: video, size: .large)
-                .frame(width: 360, height: 204)
-
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Ready to watch")
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
-                    .foregroundStyle(HappiEColor.accent)
-
-                Text(video.title)
-                    .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundStyle(HappiEColor.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(video.description.isEmpty ? "Family-approved video" : video.description)
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HappiEColor.muted)
-                    .lineLimit(2)
-
-                HStack(spacing: 14) {
-                    PrimaryButton(title: model.isPreparingPlayback ? "Opening" : "Play", systemImage: "play.fill") {
-                        Task {
-                            await model.play(video)
-                        }
-                    }
-                    .disabled(model.isPreparingPlayback)
-                    SecondaryIconButton(systemImage: "arrow.down.circle.fill", label: "Download")
-                }
-
-                if !model.playbackErrorMessage.isEmpty {
-                    Text(model.playbackErrorMessage)
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(HappiEColor.warning)
-                        .lineLimit(2)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, minHeight: 280, alignment: .leading)
-        .background(HappiEColor.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(CardStroke(cornerRadius: 28))
-    }
-}
-
-private struct BigActionRow: View {
-    let downloadedCount: Int
-    let videoCount: Int
-
-    var body: some View {
-        HStack(spacing: 18) {
-            BigActionButton(title: "Ready", detail: "\(downloadedCount)", icon: "arrow.down.to.line.compact", tint: HappiEColor.accent)
-            BigActionButton(title: "Videos", detail: "\(videoCount)", icon: "play.rectangle.fill", tint: HappiEColor.sky)
-            BigActionButton(title: "New", detail: "Sync", icon: "sparkles", tint: HappiEColor.sun)
-            BigActionButton(title: "Safe", detail: "Parent", icon: "checkmark.shield.fill", tint: HappiEColor.coral)
-        }
-    }
-}
-
-private struct BigActionButton: View {
-    let title: String
-    let detail: String
-    let icon: String
-    let tint: Color
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 32, weight: .black))
-                .frame(width: 70, height: 70)
-                .background(tint.opacity(0.16))
-                .foregroundStyle(tint)
-                .clipShape(Circle())
-
-            Text(detail)
-                .font(.system(size: 26, weight: .black, design: .rounded))
-                .foregroundStyle(HappiEColor.ink)
-                .lineLimit(1)
-
-            Text(title)
-                .font(.system(size: 17, weight: .heavy, design: .rounded))
-                .foregroundStyle(HappiEColor.muted)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 166)
-        .background(HappiEColor.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(CardStroke(cornerRadius: 26))
     }
 }
 
@@ -1568,14 +1835,16 @@ private struct VideoTile: View {
         } label: {
             VStack(alignment: .leading, spacing: 14) {
                 ThumbnailView(video: video, size: .tile)
-                    .frame(height: 188)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text(video.title)
+                    Text(video.displayTitle)
                         .font(.system(size: 24, weight: .black, design: .rounded))
                         .foregroundStyle(HappiEColor.ink)
                         .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .minimumScaleFactor(0.82)
+                        .truncationMode(.tail)
 
                     HStack(spacing: 10) {
                         Label(video.durationText, systemImage: "play.circle.fill")
@@ -1602,7 +1871,7 @@ private struct VideoTile: View {
         }
         .buttonStyle(.plain)
         .disabled(model.isPreparingPlayback)
-        .accessibilityLabel("\(video.title), \(video.durationText)\(video.isOfflineReady ? ", offline ready" : "")")
+        .accessibilityLabel("\(video.displayTitle), \(video.durationText)\(video.isOfflineReady ? ", offline ready" : "")")
         .accessibilityHint("Opens the video player")
     }
 }
@@ -1630,10 +1899,13 @@ private struct ThumbnailView: View {
                         image
                             .resizable()
                             .scaledToFill()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
                     } else {
                         ThumbnailSymbol(video: video, size: size)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ThumbnailSymbol(video: video, size: size)
             }
@@ -1766,6 +2038,7 @@ private struct LoadingLibraryView: View {
 
 private struct ParentErrorView: View {
     @ObservedObject var model: LibraryViewModel
+    let onShowSettings: () -> Void
 
     var body: some View {
         VStack(spacing: 22) {
@@ -1794,11 +2067,17 @@ private struct ParentErrorView: View {
                 }
                 .buttonStyle(PrimaryPillButtonStyle())
 
+                Button(action: onShowSettings) {
+                    Label("Settings", systemImage: "gearshape.fill")
+                        .frame(width: 190, height: 66)
+                }
+                .buttonStyle(SecondaryPillButtonStyle())
+
                 Button {
                     model.signOut()
                 } label: {
                     Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        .frame(width: 210, height: 66)
+                        .frame(width: 190, height: 66)
                 }
                 .buttonStyle(SecondaryPillButtonStyle())
             }
@@ -1879,35 +2158,25 @@ private struct ParentButton: View {
     }
 }
 
-private struct PrimaryButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.system(size: 26, weight: .black, design: .rounded))
-                .padding(.horizontal, 30)
-                .frame(height: 72)
-        }
-        .buttonStyle(PrimaryPillButtonStyle())
-    }
-}
-
 private struct SecondaryIconButton: View {
     let systemImage: String
     let label: String
+    let action: () -> Void
+
+    init(systemImage: String, label: String, action: @escaping () -> Void = {}) {
+        self.systemImage = systemImage
+        self.label = label
+        self.action = action
+    }
 
     var body: some View {
-        Button {
-        } label: {
-            Image(systemName: systemImage)
+        Button(action: action) {
+            Label(label, systemImage: systemImage)
+                .labelStyle(.iconOnly)
                 .font(.system(size: 30, weight: .black))
                 .frame(width: 72, height: 72)
         }
         .buttonStyle(IconButtonStyle())
-        .accessibilityLabel(label)
     }
 }
 
@@ -1996,6 +2265,53 @@ private extension ManifestVideo {
         downloadPriority == .required
     }
 
+    var displayTitle: String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return "Family video"
+        }
+
+        guard let url = URL(string: trimmedTitle), let host = url.host?.lowercased() else {
+            return trimmedTitle
+        }
+
+        if !url.schemeMatchesHTTP {
+            return trimmedTitle
+        }
+
+        if let descriptionTitle = meaningfulDescription {
+            return descriptionTitle
+        }
+
+        if host.contains("youtubekids") {
+            return "YouTube Kids video"
+        }
+
+        if host.contains("youtube") || host.contains("youtu.be") {
+            return "YouTube video"
+        }
+
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    private var meaningfulDescription: String? {
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty else {
+            return nil
+        }
+
+        let genericDescriptions = [
+            "imported from user-supplied youtube url.",
+            "family-approved video"
+        ]
+
+        guard !genericDescriptions.contains(trimmedDescription.lowercased()) else {
+            return nil
+        }
+
+        return trimmedDescription
+    }
+
     var durationText: String {
         guard let durationSeconds else {
             return "Video"
@@ -2030,8 +2346,18 @@ private extension ManifestVideo {
 
     var displayColor: Color {
         let palette = [HappiEColor.sky, HappiEColor.accent, HappiEColor.coral, HappiEColor.sun]
-        let index = abs(title.hashValue) % palette.count
+        let index = abs(displayTitle.hashValue) % palette.count
         return palette[index]
+    }
+}
+
+private extension URL {
+    var schemeMatchesHTTP: Bool {
+        guard let scheme = scheme?.lowercased() else {
+            return false
+        }
+
+        return scheme == "http" || scheme == "https"
     }
 }
 

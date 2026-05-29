@@ -12,7 +12,7 @@ This Xcode project has been cleaned for public release:
 
 - No personal Apple development team is required in project settings.
 - Xcode `xcuserdata` is ignored and should not be committed.
-- The API base URL is configurable through the `HAPPIE_API_BASE_URL` Info.plist value.
+- The API base URL is configurable in the app from parent sign-in or Settings, with `HAPPIE_API_BASE_URL` as the default Info.plist value.
 - The default API URL is `http://localhost:18080` for simulator development.
 - App Transport Security allows local development without enabling arbitrary network loads globally.
 

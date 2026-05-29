@@ -2,7 +2,7 @@
 //  HappiEApp.swift
 //  HappiE
 //
-//  Created by Justin Middler on 25/5/2026.
+//  Created for HappiE.
 //
 
 import SwiftUI
