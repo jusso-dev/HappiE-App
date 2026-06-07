@@ -45,6 +45,10 @@ struct ContentView: View {
             .padding(.horizontal, 32)
             .padding(.vertical, 24)
         }
+        .environment(\.offlineVideoIDs, model.offlineVideoIDs)
+        .environment(\.localThumbnailURLForVideo, { videoID in
+            model.offlineAssets.localThumbnailURL(for: videoID)
+        })
         .task {
             await model.resume()
         }
@@ -118,10 +122,14 @@ final class LibraryViewModel: ObservableObject {
     @Published var isPreparingPlayback = false
     @Published var manifestExpiresAt: Date?
     @Published private(set) var apiBaseURL: URL
+    @Published private(set) var offlineVideoIDs: Set<UUID> = []
+    @Published private(set) var downloadingVideoIDs: Set<UUID> = []
 
     private let apiConfigurationStore: APIConfigurationStore
     private let session: URLSession
     private let authStore = AuthStore()
+    private let libraryCache = LibraryCacheStore()
+    let offlineAssets: OfflineAssetStore
     private var tokens: StoredTokens?
     private var deviceId: UUID?
     private var hasResumed = false
@@ -133,7 +141,38 @@ final class LibraryViewModel: ObservableObject {
         let apiConfigurationStore = apiConfigurationStore ?? APIConfigurationStore()
         self.apiConfigurationStore = apiConfigurationStore
         self.session = session
+        self.offlineAssets = OfflineAssetStore(session: session)
         _apiBaseURL = Published(initialValue: apiConfigurationStore.loadBaseURL())
+
+        offlineAssets.$offlineVideoIDs.assign(to: &$offlineVideoIDs)
+        offlineAssets.$downloadingVideoIDs.assign(to: &$downloadingVideoIDs)
+
+        if let snapshot = libraryCache.load() {
+            children = snapshot.children
+            selectedChild = snapshot.children.first { $0.id == snapshot.selectedChildId }
+            deviceId = snapshot.deviceId
+            videos = snapshot.videos
+            manifestExpiresAt = snapshot.manifestExpiresAt
+            if snapshot.lastSyncedAt != nil {
+                lastSyncedText = "Last synced from cache"
+            }
+        }
+    }
+
+    func localPlaybackURL(for video: ManifestVideo) -> URL? {
+        offlineAssets.localVideoURL(for: video.id)
+    }
+
+    func localThumbnailURL(for video: ManifestVideo) -> URL? {
+        offlineAssets.localThumbnailURL(for: video.id)
+    }
+
+    func isOffline(_ video: ManifestVideo) -> Bool {
+        offlineVideoIDs.contains(video.id)
+    }
+
+    func isDownloading(_ video: ManifestVideo) -> Bool {
+        downloadingVideoIDs.contains(video.id)
     }
 
     var apiBaseText: String {
@@ -163,6 +202,19 @@ final class LibraryViewModel: ObservableObject {
         }
 
         tokens = storedTokens
+
+        if selectedChild != nil, deviceId != nil, !videos.isEmpty {
+            phase = .ready
+            Task { await self.refreshLibrarySilently() }
+            return
+        }
+
+        if !children.isEmpty {
+            phase = .selectingChild
+            Task { await self.loadChildren() }
+            return
+        }
+
         await loadChildren()
     }
 
@@ -206,26 +258,53 @@ final class LibraryViewModel: ObservableObject {
             return
         }
 
-        loadingMessage = "Finding kid profiles"
-        phase = .loading
+        let showsLoading = (phase != .ready && phase != .selectingChild)
+        if showsLoading {
+            loadingMessage = "Finding kid profiles"
+            phase = .loading
+        }
 
         do {
-            children = try await api.children(token: tokens.accessToken)
-            if let onlyChild = children.first, children.count == 1 {
+            let fetched = try await api.children(token: tokens.accessToken)
+            children = fetched
+            saveSnapshot()
+            if let onlyChild = fetched.first, fetched.count == 1 {
                 await select(onlyChild)
-            } else {
-                phase = children.isEmpty ? .failed : .selectingChild
-                if children.isEmpty {
-                    errorMessage = "No child profiles are ready yet. Create one in the parent admin app first."
-                }
+            } else if fetched.isEmpty {
+                phase = .failed
+                errorMessage = "No child profiles are ready yet. Create one in the parent admin app first."
+            } else if phase != .ready {
+                phase = .selectingChild
             }
         } catch {
             await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
                 await self?.loadChildren(allowTokenRefresh: false)
             } onFailure: {
-                fail(error)
+                handleLoadChildrenFailure(error)
             }
         }
+    }
+
+    private func handleLoadChildrenFailure(_ error: Error) {
+        let isAuthFailure = (error as? APIError)?.isAuthenticationFailure == true
+
+        if isAuthFailure {
+            fail(error)
+            return
+        }
+
+        if selectedChild != nil, deviceId != nil, !videos.isEmpty {
+            phase = .ready
+            playbackErrorMessage = ""
+            return
+        }
+
+        if !children.isEmpty {
+            phase = .selectingChild
+            return
+        }
+
+        fail(error)
     }
 
     func select(_ child: ChildProfile, allowTokenRefresh: Bool = true) async {
@@ -234,9 +313,15 @@ final class LibraryViewModel: ObservableObject {
             return
         }
 
+        let alreadySelected = (selectedChild?.id == child.id && deviceId != nil && !videos.isEmpty)
         selectedChild = child
-        loadingMessage = "Syncing \(child.name)'s videos"
-        phase = .loading
+
+        if alreadySelected {
+            phase = .ready
+        } else {
+            loadingMessage = "Syncing \(child.name)'s videos"
+            phase = .loading
+        }
 
         do {
             let device = try await api.registerDevice(childId: child.id, token: tokens.accessToken)
@@ -249,9 +334,20 @@ final class LibraryViewModel: ObservableObject {
             await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
                 await self?.select(child, allowTokenRefresh: false)
             } onFailure: {
-                fail(error)
+                handleSelectFailure(error, child: child)
             }
         }
+    }
+
+    private func handleSelectFailure(_ error: Error, child: ChildProfile) {
+        let isAuthFailure = (error as? APIError)?.isAuthenticationFailure == true
+
+        if !isAuthFailure, deviceId != nil, !videos.isEmpty {
+            phase = .ready
+            return
+        }
+
+        fail(error)
     }
 
     func sync() async {
@@ -292,13 +388,21 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func play(_ video: ManifestVideo, allowTokenRefresh: Bool = true) async {
-        guard let tokens else {
-            phase = .signedOut
+        playbackErrorMessage = ""
+        isPreparingPlayback = true
+
+        if let localURL = localPlaybackURL(for: video) {
+            try? configurePlaybackAudio()
+            playbackItem = PlaybackItem(video: video, url: localURL)
+            isPreparingPlayback = false
             return
         }
 
-        playbackErrorMessage = ""
-        isPreparingPlayback = true
+        guard let tokens else {
+            phase = .signedOut
+            isPreparingPlayback = false
+            return
+        }
 
         do {
             try configurePlaybackAudio()
@@ -316,12 +420,17 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func preparePlaybackItem(for video: ManifestVideo, allowTokenRefresh: Bool = true) async -> PlaybackItem? {
+        playbackErrorMessage = ""
+
+        if let localURL = localPlaybackURL(for: video) {
+            try? configurePlaybackAudio()
+            return PlaybackItem(video: video, url: localURL)
+        }
+
         guard let tokens else {
             phase = .signedOut
             return nil
         }
-
-        playbackErrorMessage = ""
 
         do {
             try configurePlaybackAudio()
@@ -347,6 +456,20 @@ final class LibraryViewModel: ObservableObject {
     private func apply(_ manifest: SyncManifest) {
         videos = manifest.videos
         manifestExpiresAt = manifest.expiresAt
+        offlineAssets.reconcile(videos: manifest.videos, removedIDs: manifest.remove)
+        saveSnapshot()
+    }
+
+    private func saveSnapshot() {
+        let snapshot = LibrarySnapshot(
+            children: children,
+            selectedChildId: selectedChild?.id,
+            deviceId: deviceId,
+            videos: videos,
+            manifestExpiresAt: manifestExpiresAt,
+            lastSyncedAt: Date()
+        )
+        libraryCache.save(snapshot)
     }
 
     func closePlayer() {
@@ -368,10 +491,15 @@ final class LibraryViewModel: ObservableObject {
 
     func signOut() {
         authStore.clear()
+        libraryCache.clear()
+        offlineAssets.clearAll()
         tokens = nil
         deviceId = nil
         selectedChild = nil
+        children = []
         videos = []
+        manifestExpiresAt = nil
+        lastSyncedText = "Not synced yet"
         phase = .signedOut
     }
 
@@ -385,6 +513,8 @@ final class LibraryViewModel: ObservableObject {
 
     private func resetSessionForServerChange() {
         authStore.clear()
+        libraryCache.clear()
+        offlineAssets.clearAll()
         tokens = nil
         deviceId = nil
         selectedChild = nil
@@ -1248,6 +1378,13 @@ private struct SuggestedVideoStrip: View {
 
 private struct SuggestedVideoCard: View {
     let video: ManifestVideo
+    @Environment(\.offlineVideoIDs) private var offlineVideoIDs
+    @Environment(\.localThumbnailURLForVideo) private var localThumbnailURLForVideo
+
+    private var isOfflineReady: Bool { offlineVideoIDs.contains(video.id) }
+    private var thumbnailURL: URL? {
+        localThumbnailURLForVideo(video.id) ?? video.thumbnailURL
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -1257,7 +1394,7 @@ private struct SuggestedVideoCard: View {
                 endPoint: .bottomTrailing
             )
 
-            if let thumbnailURL = video.thumbnailURL {
+            if let thumbnailURL {
                 AsyncImage(url: thumbnailURL) { phase in
                     if let image = phase.image {
                         image
@@ -1284,7 +1421,7 @@ private struct SuggestedVideoCard: View {
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 .padding(8)
 
-            if video.isOfflineReady {
+            if isOfflineReady {
                 OfflineReadyBadge(style: .compact)
                     .padding(8)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1295,7 +1432,7 @@ private struct SuggestedVideoCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(video.isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 4)
+                .stroke(isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 4)
         )
     }
 }
@@ -1731,7 +1868,7 @@ private struct ParentControlsMenu: View {
     let performAppAction: (AppAction) -> Void
 
     private var offlineReadyCount: Int {
-        model.videos.filter { $0.downloadPriority == .required }.count
+        model.offlineVideoIDs.count
     }
 
     var body: some View {
@@ -1827,6 +1964,9 @@ private struct VideoTile: View {
     @ObservedObject var model: LibraryViewModel
     let video: ManifestVideo
 
+    private var isOfflineReady: Bool { model.isOffline(video) }
+    private var isDownloading: Bool { model.isDownloading(video) }
+
     var body: some View {
         Button {
             Task {
@@ -1849,12 +1989,14 @@ private struct VideoTile: View {
                     HStack(spacing: 10) {
                         Label(video.durationText, systemImage: "play.circle.fill")
 
-                        if video.isOfflineReady {
+                        if isOfflineReady {
                             Label("Offline ready", systemImage: "checkmark.circle.fill")
+                        } else if isDownloading {
+                            Label("Downloading", systemImage: "arrow.down.circle")
                         }
                     }
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(video.isOfflineReady ? HappiEColor.accent : HappiEColor.muted)
+                    .foregroundStyle(isOfflineReady ? HappiEColor.accent : HappiEColor.muted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 }
@@ -1866,12 +2008,12 @@ private struct VideoTile: View {
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(video.isOfflineReady ? HappiEColor.accent : HappiEColor.line, lineWidth: video.isOfflineReady ? 4 : 2)
+                    .stroke(isOfflineReady ? HappiEColor.accent : HappiEColor.line, lineWidth: isOfflineReady ? 4 : 2)
             )
         }
         .buttonStyle(.plain)
         .disabled(model.isPreparingPlayback)
-        .accessibilityLabel("\(video.displayTitle), \(video.durationText)\(video.isOfflineReady ? ", offline ready" : "")")
+        .accessibilityLabel("\(video.displayTitle), \(video.durationText)\(isOfflineReady ? ", offline ready" : "")")
         .accessibilityHint("Opens the video player")
     }
 }
@@ -1884,6 +2026,13 @@ private struct ThumbnailView: View {
 
     let video: ManifestVideo
     let size: Size
+    @Environment(\.offlineVideoIDs) private var offlineVideoIDs
+    @Environment(\.localThumbnailURLForVideo) private var localThumbnailURLForVideo
+
+    private var isOfflineReady: Bool { offlineVideoIDs.contains(video.id) }
+    private var thumbnailURL: URL? {
+        localThumbnailURLForVideo(video.id) ?? video.thumbnailURL
+    }
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
@@ -1893,7 +2042,7 @@ private struct ThumbnailView: View {
                 endPoint: .bottomTrailing
             )
 
-            if let thumbnailURL = video.thumbnailURL {
+            if let thumbnailURL {
                 AsyncImage(url: thumbnailURL) { phase in
                     if let image = phase.image {
                         image
@@ -1924,7 +2073,7 @@ private struct ThumbnailView: View {
             .clipShape(Capsule())
             .padding(14)
 
-            if video.isOfflineReady {
+            if isOfflineReady {
                 OfflineReadyBadge(style: size == .large ? .large : .standard)
                     .padding(14)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1934,7 +2083,7 @@ private struct ThumbnailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(video.isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 5)
+                .stroke(isOfflineReady ? HappiEColor.accent : .clear, lineWidth: 5)
         )
     }
 }
@@ -2260,11 +2409,27 @@ private extension ChildProfile {
     }
 }
 
-private extension ManifestVideo {
-    var isOfflineReady: Bool {
-        downloadPriority == .required
+private struct OfflineVideoIDsKey: EnvironmentKey {
+    static let defaultValue: Set<UUID> = []
+}
+
+private struct LocalThumbnailURLForVideoKey: EnvironmentKey {
+    static let defaultValue: (UUID) -> URL? = { _ in nil }
+}
+
+private extension EnvironmentValues {
+    var offlineVideoIDs: Set<UUID> {
+        get { self[OfflineVideoIDsKey.self] }
+        set { self[OfflineVideoIDsKey.self] = newValue }
     }
 
+    var localThumbnailURLForVideo: (UUID) -> URL? {
+        get { self[LocalThumbnailURLForVideoKey.self] }
+        set { self[LocalThumbnailURLForVideoKey.self] = newValue }
+    }
+}
+
+private extension ManifestVideo {
     var displayTitle: String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else {

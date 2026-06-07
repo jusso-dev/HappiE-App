@@ -228,7 +228,7 @@ struct TokenResponse: Decodable {
     let refreshToken: String
 }
 
-struct ChildProfile: Identifiable, Decodable, Equatable {
+struct ChildProfile: Identifiable, Codable, Equatable {
     let id: UUID
     let name: String
     let avatarColor: String?
@@ -249,7 +249,7 @@ struct DeviceRegistration: Decodable {
     let storageQuotaMb: Int
 }
 
-struct SyncManifest: Decodable {
+struct SyncManifest: Codable {
     let deviceId: UUID
     let childProfileId: UUID
     let storageQuotaMb: Int
@@ -258,7 +258,7 @@ struct SyncManifest: Decodable {
     let remove: [UUID]
 }
 
-struct ManifestVideo: Identifiable, Decodable {
+struct ManifestVideo: Identifiable, Codable {
     let id: UUID
     let title: String
     let description: String
@@ -272,7 +272,7 @@ struct ManifestVideo: Identifiable, Decodable {
     }
 }
 
-struct ManifestAsset: Identifiable, Decodable {
+struct ManifestAsset: Identifiable, Codable {
     let id: UUID
     let kind: AssetKind
     let quality: String?
@@ -284,13 +284,13 @@ struct ManifestAsset: Identifiable, Decodable {
     let url: URL
 }
 
-enum DownloadPriority: String, Decodable {
+enum DownloadPriority: String, Codable {
     case required
     case normal
     case optional
 }
 
-enum AssetKind: String, Decodable {
+enum AssetKind: String, Codable {
     case original
     case mp4
     case hls
