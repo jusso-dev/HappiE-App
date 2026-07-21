@@ -26,16 +26,16 @@ struct ContentView: View {
                 switch model.phase {
                 case .welcome:
                     WelcomeAnimationView(message: model.welcomeMessage)
-                case .signedOut:
-                    ParentLoginView(model: model, onShowSettings: {
-                        isShowingAPISettings = true
-                    })
                 case .loading:
                     LoadingLibraryView(message: model.loadingMessage)
                 case .selectingChild:
-                    ChildPickerView(model: model, performAppAction: performAppAction(_:))
+                    ChildPickerView(model: model) {
+                        isShowingAPISettings = true
+                    }
                 case .ready:
-                    LibraryHomeView(model: model, performAppAction: performAppAction(_:))
+                    LibraryHomeView(model: model) {
+                        isShowingAPISettings = true
+                    }
                 case .failed:
                     ParentErrorView(model: model, onShowSettings: {
                         isShowingAPISettings = true
@@ -80,36 +80,19 @@ struct ContentView: View {
         }
     }
 
-    private func performAppAction(_ action: AppAction) {
-        switch action {
-        case .switchProfile:
-            model.phase = .selectingChild
-        case .signOut:
-            model.signOut()
-        case .settings:
-            isShowingAPISettings = true
-        }
-    }
-}
-
-private enum AppAction {
-    case switchProfile
-    case signOut
-    case settings
 }
 
 @MainActor
 final class LibraryViewModel: ObservableObject {
     enum Phase {
         case welcome
-        case signedOut
         case loading
         case selectingChild
         case ready
         case failed
     }
 
-    @Published var phase: Phase = .signedOut
+    @Published var phase: Phase = .welcome
     @Published var children: [ChildProfile] = []
     @Published var selectedChild: ChildProfile?
     @Published var videos: [ManifestVideo] = []
@@ -127,11 +110,10 @@ final class LibraryViewModel: ObservableObject {
 
     private let apiConfigurationStore: APIConfigurationStore
     private let session: URLSession
-    private let authStore = AuthStore()
     private let libraryCache = LibraryCacheStore()
     let offlineAssets: OfflineAssetStore
-    private var tokens: StoredTokens?
     private var deviceId: UUID?
+    private var hasCachedSnapshot = false
     private var hasResumed = false
 
     init(
@@ -148,6 +130,7 @@ final class LibraryViewModel: ObservableObject {
         offlineAssets.$downloadingVideoIDs.assign(to: &$downloadingVideoIDs)
 
         if let snapshot = libraryCache.load() {
+            hasCachedSnapshot = true
             children = snapshot.children
             selectedChild = snapshot.children.first { $0.id == snapshot.selectedChildId }
             deviceId = snapshot.deviceId
@@ -196,14 +179,7 @@ final class LibraryViewModel: ObservableObject {
         hasResumed = true
         await showWelcome(message: "HappiE")
 
-        guard let storedTokens = authStore.loadTokens() else {
-            phase = .signedOut
-            return
-        }
-
-        tokens = storedTokens
-
-        if selectedChild != nil, deviceId != nil, !videos.isEmpty {
+        if hasCachedSnapshot, selectedChild != nil, deviceId != nil {
             phase = .ready
             Task { await self.refreshLibrarySilently() }
             return
@@ -216,25 +192,6 @@ final class LibraryViewModel: ObservableObject {
         }
 
         await loadChildren()
-    }
-
-    func signIn(email: String, password: String) async {
-        loadingMessage = "Opening your family library"
-        phase = .loading
-
-        do {
-            let tokenResponse = try await api.login(email: email, password: password)
-            let storedTokens = StoredTokens(
-                accessToken: tokenResponse.accessToken,
-                refreshToken: tokenResponse.refreshToken
-            )
-            authStore.save(storedTokens)
-            tokens = storedTokens
-            await showWelcome(message: "Let's watch")
-            await loadChildren()
-        } catch {
-            fail(error)
-        }
     }
 
     @discardableResult
@@ -252,12 +209,7 @@ final class LibraryViewModel: ObservableObject {
         return applyAPIBaseURL(newURL)
     }
 
-    func loadChildren(allowTokenRefresh: Bool = true) async {
-        guard let tokens else {
-            phase = .signedOut
-            return
-        }
-
+    func loadChildren() async {
         let showsLoading = (phase != .ready && phase != .selectingChild)
         if showsLoading {
             loadingMessage = "Finding kid profiles"
@@ -265,7 +217,7 @@ final class LibraryViewModel: ObservableObject {
         }
 
         do {
-            let fetched = try await api.children(token: tokens.accessToken)
+            let fetched = try await api.children()
             children = fetched
             saveSnapshot()
             if let onlyChild = fetched.first, fetched.count == 1 {
@@ -277,25 +229,15 @@ final class LibraryViewModel: ObservableObject {
                 phase = .selectingChild
             }
         } catch {
-            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
-                await self?.loadChildren(allowTokenRefresh: false)
-            } onFailure: {
-                handleLoadChildrenFailure(error)
-            }
+            handleLoadChildrenFailure(error)
         }
     }
 
     private func handleLoadChildrenFailure(_ error: Error) {
-        let isAuthFailure = (error as? APIError)?.isAuthenticationFailure == true
-
-        if isAuthFailure {
-            fail(error)
-            return
-        }
-
-        if selectedChild != nil, deviceId != nil, !videos.isEmpty {
+        if hasCachedSnapshot, selectedChild != nil, deviceId != nil {
             phase = .ready
             playbackErrorMessage = ""
+            lastSyncedText = "Offline · showing saved library"
             return
         }
 
@@ -307,16 +249,13 @@ final class LibraryViewModel: ObservableObject {
         fail(error)
     }
 
-    func select(_ child: ChildProfile, allowTokenRefresh: Bool = true) async {
-        guard let tokens else {
-            phase = .signedOut
-            return
-        }
-
-        let alreadySelected = (selectedChild?.id == child.id && deviceId != nil && !videos.isEmpty)
+    func select(_ child: ChildProfile) async {
+        let previousSelectedChild = selectedChild
+        let previousDeviceId = deviceId
+        let canUseCachedLibrary = hasCachedSnapshot && selectedChild?.id == child.id && deviceId != nil
         selectedChild = child
 
-        if alreadySelected {
+        if canUseCachedLibrary {
             phase = .ready
         } else {
             loadingMessage = "Syncing \(child.name)'s videos"
@@ -324,29 +263,36 @@ final class LibraryViewModel: ObservableObject {
         }
 
         do {
-            let device = try await api.registerDevice(childId: child.id, token: tokens.accessToken)
+            let device = try await api.registerDevice(childId: child.id)
             deviceId = device.id
-            let manifest = try await api.syncDevice(deviceId: device.id, token: tokens.accessToken)
+            let manifest = try await api.syncDevice(deviceId: device.id)
             apply(manifest)
             lastSyncedText = "Synced just now"
             phase = .ready
         } catch {
-            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
-                await self?.select(child, allowTokenRefresh: false)
-            } onFailure: {
-                handleSelectFailure(error, child: child)
-            }
+            handleSelectFailure(
+                error,
+                canUseCachedLibrary: canUseCachedLibrary,
+                previousSelectedChild: previousSelectedChild,
+                previousDeviceId: previousDeviceId
+            )
         }
     }
 
-    private func handleSelectFailure(_ error: Error, child: ChildProfile) {
-        let isAuthFailure = (error as? APIError)?.isAuthenticationFailure == true
-
-        if !isAuthFailure, deviceId != nil, !videos.isEmpty {
+    private func handleSelectFailure(
+        _ error: Error,
+        canUseCachedLibrary: Bool,
+        previousSelectedChild: ChildProfile?,
+        previousDeviceId: UUID?
+    ) {
+        if canUseCachedLibrary {
             phase = .ready
+            lastSyncedText = "Offline · showing saved library"
             return
         }
 
+        selectedChild = previousSelectedChild
+        deviceId = previousDeviceId
         fail(error)
     }
 
@@ -359,7 +305,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     private func sync(showLoading: Bool) async {
-        guard let tokens, let deviceId else {
+        guard let deviceId else {
             if let child = selectedChild {
                 await select(child)
             }
@@ -372,14 +318,17 @@ final class LibraryViewModel: ObservableObject {
         }
 
         do {
-            let manifest = try await api.syncDevice(deviceId: deviceId, token: tokens.accessToken)
+            let manifest = try await api.syncDevice(deviceId: deviceId)
             apply(manifest)
             lastSyncedText = "Synced just now"
             if showLoading {
                 phase = .ready
             }
         } catch {
-            if showLoading {
+            if hasCachedSnapshot, selectedChild != nil {
+                lastSyncedText = "Offline · showing saved library"
+                phase = .ready
+            } else if showLoading {
                 fail(error)
             } else {
                 playbackErrorMessage = error.localizedDescription
@@ -387,7 +336,7 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func play(_ video: ManifestVideo, allowTokenRefresh: Bool = true) async {
+    func play(_ video: ManifestVideo) async {
         playbackErrorMessage = ""
         isPreparingPlayback = true
 
@@ -398,28 +347,18 @@ final class LibraryViewModel: ObservableObject {
             return
         }
 
-        guard let tokens else {
-            phase = .signedOut
-            isPreparingPlayback = false
-            return
-        }
-
         do {
             try configurePlaybackAudio()
-            let response = try await api.playbackURL(videoId: video.id, token: tokens.accessToken)
+            let response = try await api.playbackURL(videoId: video.id)
             playbackItem = PlaybackItem(video: video, url: response.url)
         } catch {
-            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
-                await self?.play(video, allowTokenRefresh: false)
-            } onFailure: {
-                playbackErrorMessage = error.localizedDescription
-            }
+            playbackErrorMessage = error.localizedDescription
         }
 
         isPreparingPlayback = false
     }
 
-    func preparePlaybackItem(for video: ManifestVideo, allowTokenRefresh: Bool = true) async -> PlaybackItem? {
+    func preparePlaybackItem(for video: ManifestVideo) async -> PlaybackItem? {
         playbackErrorMessage = ""
 
         if let localURL = localPlaybackURL(for: video) {
@@ -427,23 +366,13 @@ final class LibraryViewModel: ObservableObject {
             return PlaybackItem(video: video, url: localURL)
         }
 
-        guard let tokens else {
-            phase = .signedOut
-            return nil
-        }
-
         do {
             try configurePlaybackAudio()
-            let response = try await api.playbackURL(videoId: video.id, token: tokens.accessToken)
+            let response = try await api.playbackURL(videoId: video.id)
             return PlaybackItem(video: video, url: response.url)
         } catch {
-            var preparedItem: PlaybackItem?
-            await refreshThenRetry(after: error, allowTokenRefresh: allowTokenRefresh) { [weak self] in
-                preparedItem = await self?.preparePlaybackItem(for: video, allowTokenRefresh: false)
-            } onFailure: {
-                playbackErrorMessage = error.localizedDescription
-            }
-            return preparedItem
+            playbackErrorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -461,6 +390,7 @@ final class LibraryViewModel: ObservableObject {
     }
 
     private func saveSnapshot() {
+        hasCachedSnapshot = true
         let snapshot = LibrarySnapshot(
             children: children,
             selectedChildId: selectedChild?.id,
@@ -489,33 +419,18 @@ final class LibraryViewModel: ObservableObject {
         }
     }
 
-    func signOut() {
-        authStore.clear()
-        libraryCache.clear()
-        offlineAssets.clearAll()
-        tokens = nil
-        deviceId = nil
-        selectedChild = nil
-        children = []
-        videos = []
-        manifestExpiresAt = nil
-        lastSyncedText = "Not synced yet"
-        phase = .signedOut
-    }
-
     private func applyAPIBaseURL(_ newURL: URL) -> Bool {
         guard newURL != apiBaseURL else { return false }
 
         apiBaseURL = newURL
-        resetSessionForServerChange()
+        resetLibraryForServerChange()
         return true
     }
 
-    private func resetSessionForServerChange() {
-        authStore.clear()
+    private func resetLibraryForServerChange() {
         libraryCache.clear()
         offlineAssets.clearAll()
-        tokens = nil
+        hasCachedSnapshot = false
         deviceId = nil
         selectedChild = nil
         children = []
@@ -526,37 +441,9 @@ final class LibraryViewModel: ObservableObject {
         manifestExpiresAt = nil
         lastSyncedText = "Not synced yet"
         errorMessage = ""
-
-        if phase != .signedOut && phase != .welcome {
-            phase = .signedOut
-        }
-    }
-
-    private func refreshThenRetry(
-        after error: Error,
-        allowTokenRefresh: Bool,
-        _ retry: @escaping () async -> Void,
-        onFailure: () -> Void
-    ) async {
-        guard
-            allowTokenRefresh,
-            (error as? APIError)?.isAuthenticationFailure == true,
-            let refreshToken = tokens?.refreshToken
-        else {
-            onFailure()
-            return
-        }
-
-        do {
-            let response = try await api.refresh(refreshToken: refreshToken)
-            let refreshed = StoredTokens(accessToken: response.accessToken, refreshToken: response.refreshToken)
-            authStore.save(refreshed)
-            tokens = refreshed
-            await retry()
-        } catch {
-            authStore.clear()
-            onFailure()
-        }
+        loadingMessage = "Connecting to your family library"
+        phase = .loading
+        Task { await loadChildren() }
     }
 
     private func fail(_ error: Error) {
@@ -568,140 +455,6 @@ final class LibraryViewModel: ObservableObject {
         welcomeMessage = message
         phase = .welcome
         try? await Task.sleep(nanoseconds: 1_650_000_000)
-    }
-}
-
-private struct ParentLoginView: View {
-    @ObservedObject var model: LibraryViewModel
-    let onShowSettings: () -> Void
-
-    @State private var email = ""
-    @State private var password = ""
-    @State private var apiBaseURLText = ""
-    @State private var apiBaseURLError = ""
-
-    var body: some View {
-        HStack(spacing: 40) {
-            VStack(alignment: .leading, spacing: 28) {
-                BrandMark()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("HappiE")
-                        .font(.system(size: 64, weight: .black, design: .rounded))
-                        .foregroundStyle(HappiEColor.ink)
-
-                    Text("Private family videos for little hands.")
-                        .font(.system(size: 25, weight: .bold, design: .rounded))
-                        .foregroundStyle(HappiEColor.muted)
-                }
-
-                HStack(spacing: 16) {
-                    TrustBadge(icon: "lock.fill", title: "Parent approved")
-                    TrustBadge(icon: "ipad", title: "iPad ready")
-                    TrustBadge(icon: "arrow.down.circle.fill", title: "Offline videos")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 16) {
-                    Text("Parent sign in")
-                        .font(.system(size: 32, weight: .black, design: .rounded))
-                        .foregroundStyle(HappiEColor.ink)
-
-                    Spacer()
-
-                    Button("API Settings", systemImage: "gearshape.fill", action: onShowSettings)
-                        .labelStyle(.iconOnly)
-                        .font(.system(size: 24, weight: .black))
-                        .frame(width: 52, height: 52)
-                        .buttonStyle(IconButtonStyle())
-                }
-
-                TextField("Email", text: $email)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .textFieldStyle(.plain)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
-                    .inputPanel()
-
-                SecureField("Password", text: $password)
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .textFieldStyle(.plain)
-                    .textContentType(.password)
-                    .inputPanel()
-
-                APIBaseURLEditor(
-                    title: "API server",
-                    text: $apiBaseURLText,
-                    currentText: model.apiBaseText,
-                    defaultText: model.defaultAPIBaseText,
-                    errorMessage: apiBaseURLError,
-                    saveTitle: "Use Server",
-                    resetTitle: "Default",
-                    onSave: {
-                        saveAPIBaseURL()
-                    },
-                    onReset: resetAPIBaseURL
-                )
-
-                Button {
-                    signIn()
-                } label: {
-                    Label("Open Library", systemImage: "play.fill")
-                        .font(.system(size: 25, weight: .black, design: .rounded))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 74)
-                }
-                .buttonStyle(PrimaryPillButtonStyle())
-                .disabled(email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
-            }
-            .padding(28)
-            .frame(width: 420)
-            .background(HappiEColor.panel)
-            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .overlay(CardStroke(cornerRadius: 28))
-        }
-        .onAppear(perform: syncAPIBaseURLText)
-        .onChange(of: model.apiBaseURL) { _, _ in
-            syncAPIBaseURLText()
-        }
-    }
-
-    private func signIn() {
-        guard saveAPIBaseURL() else { return }
-
-        Task {
-            await model.signIn(
-                email: email.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password
-            )
-        }
-    }
-
-    @discardableResult
-    private func saveAPIBaseURL() -> Bool {
-        do {
-            try model.updateAPIBaseURL(apiBaseURLText)
-            apiBaseURLText = model.apiBaseText
-            apiBaseURLError = ""
-            return true
-        } catch {
-            apiBaseURLError = error.localizedDescription
-            return false
-        }
-    }
-
-    private func resetAPIBaseURL() {
-        model.resetAPIBaseURLToDefault()
-        syncAPIBaseURLText()
-        apiBaseURLError = ""
-    }
-
-    private func syncAPIBaseURLText() {
-        apiBaseURLText = model.apiBaseText
     }
 }
 
@@ -724,7 +477,7 @@ private struct APISettingsScreen: View {
                             .font(.system(size: 34, weight: .black, design: .rounded))
                             .foregroundStyle(HappiEColor.ink)
 
-                        Text("Changing servers signs out this device.")
+                        Text("Changing servers clears saved library data from the previous server.")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(HappiEColor.muted)
                     }
@@ -1761,7 +1514,7 @@ private struct PlayerPillButtonStyle: ButtonStyle {
 
 private struct ChildPickerView: View {
     @ObservedObject var model: LibraryViewModel
-    let performAppAction: (AppAction) -> Void
+    let onShowSettings: () -> Void
 
     var body: some View {
         ZStack {
@@ -1770,14 +1523,8 @@ private struct ChildPickerView: View {
                     title: "Who is watching?",
                     subtitle: "Choose a parent-approved profile",
                     trailing: {
-                        HStack(spacing: 12) {
-                            SecondaryIconButton(systemImage: "gearshape.fill", label: "Settings") {
-                                performAppAction(.settings)
-                            }
-
-                            ParentButton(title: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
-                                performAppAction(.signOut)
-                            }
+                        SecondaryIconButton(systemImage: "gearshape.fill", label: "Settings") {
+                            onShowSettings()
                         }
                     }
                 )
@@ -1824,7 +1571,7 @@ private struct ChildPickerView: View {
 
 private struct LibraryHomeView: View {
     @ObservedObject var model: LibraryViewModel
-    let performAppAction: (AppAction) -> Void
+    let onShowSettings: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1832,7 +1579,7 @@ private struct LibraryHomeView: View {
                 title: "Hi, \(model.selectedChild?.name ?? "there")",
                 subtitle: model.lastSyncedText,
                 trailing: {
-                    ParentControlsMenu(model: model, performAppAction: performAppAction)
+                    ParentControlsMenu(model: model, onShowSettings: onShowSettings)
                 }
             )
             .padding(.bottom, 20)
@@ -1865,7 +1612,7 @@ private struct LibraryHomeView: View {
 
 private struct ParentControlsMenu: View {
     @ObservedObject var model: LibraryViewModel
-    let performAppAction: (AppAction) -> Void
+    let onShowSettings: () -> Void
 
     private var offlineReadyCount: Int {
         model.offlineVideoIDs.count
@@ -1891,17 +1638,11 @@ private struct ParentControlsMenu: View {
                 }
 
                 Button("Settings", systemImage: "gearshape.fill") {
-                    performAppAction(.settings)
-                }
-            }
-
-            Section {
-                Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right") {
-                    performAppAction(.signOut)
+                    onShowSettings()
                 }
             }
         } label: {
-            Label("Parent", systemImage: "lock.shield.fill")
+            Label("Library", systemImage: "slider.horizontal.3")
                 .font(.system(size: 20, weight: .black, design: .rounded))
                 .padding(.horizontal, 22)
                 .frame(height: 62)
@@ -2191,11 +1932,11 @@ private struct ParentErrorView: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            Image(systemName: "lock.shield.fill")
+            Image(systemName: "wifi.exclamationmark")
                 .font(.system(size: 76, weight: .black))
                 .foregroundStyle(HappiEColor.warning)
 
-            Text("Parent help needed")
+            Text("Library unavailable")
                 .font(.system(size: 42, weight: .black, design: .rounded))
                 .foregroundStyle(HappiEColor.ink)
 
@@ -2222,13 +1963,6 @@ private struct ParentErrorView: View {
                 }
                 .buttonStyle(SecondaryPillButtonStyle())
 
-                Button {
-                    model.signOut()
-                } label: {
-                    Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        .frame(width: 190, height: 66)
-                }
-                .buttonStyle(SecondaryPillButtonStyle())
             }
         }
         .padding(32)
@@ -2257,22 +1991,6 @@ private struct BrandMark: View {
     }
 }
 
-private struct TrustBadge: View {
-    let icon: String
-    let title: String
-
-    var body: some View {
-        Label(title, systemImage: icon)
-            .font(.system(size: 17, weight: .black, design: .rounded))
-            .foregroundStyle(HappiEColor.ink)
-            .padding(.horizontal, 16)
-            .frame(height: 48)
-            .background(HappiEColor.panel)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(HappiEColor.line, lineWidth: 2))
-    }
-}
-
 private struct AvatarCircle: View {
     let name: String
     let color: Color
@@ -2288,22 +2006,6 @@ private struct AvatarCircle: View {
                 .foregroundStyle(HappiEColor.panel)
         }
         .frame(width: size, height: size)
-    }
-}
-
-private struct ParentButton: View {
-    let title: String
-    let icon: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 20, weight: .black, design: .rounded))
-                .padding(.horizontal, 22)
-                .frame(height: 62)
-        }
-        .buttonStyle(SecondaryPillButtonStyle())
     }
 }
 

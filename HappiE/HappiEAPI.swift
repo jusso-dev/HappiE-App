@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import Security
 
 struct APIEnvironment {
     static let local = APIEnvironment(baseURL: defaultBaseURL)
@@ -27,29 +26,11 @@ struct APIClient {
     var environment: APIEnvironment = .local
     var session: URLSession = .shared
 
-    func login(email: String, password: String) async throws -> TokenResponse {
-        try await request(
-            "/auth/login",
-            method: "POST",
-            body: LoginRequest(email: email, password: password),
-            token: nil
-        )
+    func children() async throws -> [ChildProfile] {
+        try await request("/children")
     }
 
-    func refresh(refreshToken: String) async throws -> TokenResponse {
-        try await request(
-            "/auth/refresh",
-            method: "POST",
-            body: RefreshRequest(refreshToken: refreshToken),
-            token: nil
-        )
-    }
-
-    func children(token: String) async throws -> [ChildProfile] {
-        try await request("/children", token: token)
-    }
-
-    func registerDevice(childId: UUID, token: String) async throws -> DeviceRegistration {
+    func registerDevice(childId: UUID) async throws -> DeviceRegistration {
         try await request(
             "/devices/register",
             method: "POST",
@@ -58,43 +39,36 @@ struct APIClient {
                 name: "Family iPad",
                 platform: "ios",
                 storageQuotaMb: 8192
-            ),
-            token: token
+            )
         )
     }
 
-    func syncDevice(deviceId: UUID, token: String) async throws -> SyncManifest {
-        try await request("/devices/\(deviceId.uuidString)/sync", method: "POST", token: token)
+    func syncDevice(deviceId: UUID) async throws -> SyncManifest {
+        try await request("/devices/\(deviceId.uuidString)/sync", method: "POST")
     }
 
-    func playbackURL(videoId: UUID, token: String) async throws -> PlaybackURLResponse {
-        try await request("/videos/\(videoId.uuidString)/playback-url", token: token)
+    func playbackURL(videoId: UUID) async throws -> PlaybackURLResponse {
+        try await request("/videos/\(videoId.uuidString)/playback-url")
     }
 
     private func request<Response: Decodable>(
         _ path: String,
-        method: String = "GET",
-        token: String?
+        method: String = "GET"
     ) async throws -> Response {
         let emptyBody: EmptyBody? = nil
-        return try await request(path, method: method, body: emptyBody, token: token)
+        return try await request(path, method: method, body: emptyBody)
     }
 
     private func request<Body: Encodable, Response: Decodable>(
         _ path: String,
         method: String = "GET",
-        body: Body?,
-        token: String?
+        body: Body?
     ) async throws -> Response {
         let url = environment.baseURL.appending(path: path)
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 12
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        if let token {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
 
         if let body {
             let encoder = JSONEncoder()
@@ -140,93 +114,7 @@ struct APIClient {
     }
 }
 
-final class AuthStore {
-    private let service = "au.com.HappiE.auth"
-
-    func loadTokens() -> StoredTokens? {
-        guard
-            let accessToken = read("accessToken"),
-            let refreshToken = read("refreshToken")
-        else {
-            return nil
-        }
-
-        return StoredTokens(accessToken: accessToken, refreshToken: refreshToken)
-    }
-
-    func save(_ tokens: StoredTokens) {
-        write(tokens.accessToken, key: "accessToken")
-        write(tokens.refreshToken, key: "refreshToken")
-    }
-
-    func clear() {
-        delete("accessToken")
-        delete("refreshToken")
-    }
-
-    private func read(_ key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data
-        else {
-            return nil
-        }
-
-        return String(data: data, encoding: .utf8)
-    }
-
-    private func write(_ value: String, key: String) {
-        delete(key)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: Data(value.utf8)
-        ]
-
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    private func delete(_ key: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key
-        ]
-
-        SecItemDelete(query as CFDictionary)
-    }
-}
-
-struct StoredTokens {
-    let accessToken: String
-    let refreshToken: String
-}
-
 struct EmptyBody: Encodable {}
-
-struct LoginRequest: Encodable {
-    let email: String
-    let password: String
-}
-
-struct RefreshRequest: Encodable {
-    let refreshToken: String
-}
-
-struct TokenResponse: Decodable {
-    let accessToken: String
-    let refreshToken: String
-}
 
 struct ChildProfile: Identifiable, Codable, Equatable {
     let id: UUID
@@ -313,15 +201,6 @@ enum APIError: LocalizedError {
     case server(statusCode: Int, message: String)
     case transport(url: URL, error: URLError)
     case unexpectedPayload(contentType: String)
-
-    var isAuthenticationFailure: Bool {
-        switch self {
-        case .httpStatus(401), .server(statusCode: 401, message: _):
-            true
-        default:
-            false
-        }
-    }
 
     var errorDescription: String? {
         switch self {
