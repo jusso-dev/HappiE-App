@@ -264,6 +264,16 @@ enum APIError: LocalizedError {
     case transport(url: URL, error: URLError)
     case unexpectedPayload(contentType: String)
 
+    /// True when the server simply couldn't be reached — the offline cases.
+    var isConnectivityFailure: Bool {
+        switch self {
+        case .transport, .network:
+            true
+        default:
+            false
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalidResponse:

@@ -102,6 +102,12 @@ final class AppModel {
             Task {
                 await recoverFromOfflineIfNeeded()
             }
+        } else if phase == .ready {
+            // Refresh quietly on return — also detects a server that died
+            // while we were away (the quiet failure marks us offline).
+            Task {
+                await sync(showLoading: false, quiet: true)
+            }
         }
     }
 
@@ -258,6 +264,7 @@ final class AppModel {
                     if !quiet {
                         playbackErrorMessage = error.localizedDescription
                     }
+                    markOfflineOnConnectivityFailure(error)
                 }
             }
             return
@@ -281,8 +288,11 @@ final class AppModel {
                     return
                 }
                 fail(error)
-            } else if !quiet {
-                playbackErrorMessage = error.localizedDescription
+            } else {
+                if !quiet {
+                    playbackErrorMessage = error.localizedDescription
+                }
+                markOfflineOnConnectivityFailure(error)
             }
         }
     }
@@ -310,6 +320,7 @@ final class AppModel {
             playbackItem = PlaybackItem(video: video, url: url, resumeAt: resumeAt)
         } catch {
             playbackErrorMessage = error.localizedDescription
+            markOfflineOnConnectivityFailure(error)
         }
     }
 
@@ -350,6 +361,7 @@ final class AppModel {
             playbackItem = PlaybackItem(video: video, url: url, resumeAt: resumeAt)
         } catch {
             playbackErrorMessage = error.localizedDescription
+            markOfflineOnConnectivityFailure(error)
         }
     }
 
@@ -371,7 +383,16 @@ final class AppModel {
             return PlaybackItem(video: video, url: url)
         } catch {
             playbackErrorMessage = error.localizedDescription
+            markOfflineOnConnectivityFailure(error)
             return nil
+        }
+    }
+
+    /// A failed request that couldn't reach the server means we're
+    /// effectively offline — switch modes so the retry loop takes over.
+    private func markOfflineOnConnectivityFailure(_ error: Error) {
+        if (error as? APIError)?.isConnectivityFailure == true {
+            markOffline()
         }
     }
 
