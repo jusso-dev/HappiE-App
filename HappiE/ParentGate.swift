@@ -19,6 +19,14 @@ struct ParentGateView: View {
     @State private var attemptFailed = false
 
     var body: some View {
+        ScrollView {
+            gateContent
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HTheme.background)
+    }
+
+    private var gateContent: some View {
         VStack(spacing: 24) {
             VStack(spacing: 8) {
                 Image(systemName: "lock.shield.fill")
@@ -67,9 +75,7 @@ struct ParentGateView: View {
             .foregroundStyle(HTheme.muted)
         }
         .padding(28)
-        .presentationDetents([.large, .medium])
-        .presentationDragIndicator(.visible)
-        .background(HTheme.background)
+        .frame(maxWidth: .infinity)
     }
 
     private var keypad: some View {

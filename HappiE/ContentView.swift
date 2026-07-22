@@ -37,6 +37,10 @@ struct ContentView: View {
         }
         .preferredColorScheme(.light)
         .task {
+            // UI-test hook: present the parental gate immediately.
+            if CommandLine.arguments.contains("-uitest-parent-gate") {
+                isShowingParentGate = true
+            }
             await model.start()
         }
         .onChange(of: scenePhase) { _, newPhase in
