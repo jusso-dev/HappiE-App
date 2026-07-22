@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Foundation
+import Network
 import Observation
 import SwiftUI
 
@@ -52,6 +53,8 @@ final class AppModel {
     private var deviceId: UUID?
     private var hasStarted = false
     private var lastReportedProgress: [UUID: Double] = [:]
+    private let pathMonitor = NWPathMonitor()
+    private var offlineRetryTask: Task<Void, Never>?
 
     private static let selectedChildKey = "HappiESelectedChildId"
     private static let autoDownloadKey = "HappiEAutoDownloadRequired"
@@ -67,6 +70,43 @@ final class AppModel {
         self.defaults = defaults
         self.history = WatchHistoryStore(session: session)
         self.apiBaseURL = apiConfigurationStore.loadBaseURL()
+        startNetworkMonitoring()
+    }
+
+    /// Recovers as soon as connectivity returns, instead of waiting for the
+    /// child to find and press a retry button.
+    private func startNetworkMonitoring() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self, satisfied else { return }
+                await recoverFromOfflineIfNeeded()
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "au.com.HappiE.network-monitor"))
+    }
+
+    /// Retries quietly every few seconds while offline — this also catches
+    /// the server coming back when the network itself never dropped.
+    private func startOfflineRetryLoop() {
+        guard offlineRetryTask == nil else { return }
+        offlineRetryTask = Task { [weak self] in
+            defer { self?.offlineRetryTask = nil }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                guard let self, isOfflineMode else { return }
+                await recoverFromOfflineIfNeeded()
+            }
+        }
+    }
+
+    private func recoverFromOfflineIfNeeded() async {
+        guard isOfflineMode else { return }
+        if selectedChild != nil {
+            await sync(showLoading: false, quiet: true)
+        } else if let refreshed = try? await api.children(), !refreshed.isEmpty {
+            await loadChildren()
+        }
     }
 
     var apiBaseText: String {
@@ -163,7 +203,7 @@ final class AppModel {
         await sync(showLoading: false)
     }
 
-    private func sync(showLoading: Bool) async {
+    private func sync(showLoading: Bool, quiet: Bool = false) async {
         guard let child = selectedChild else { return }
         guard let deviceId else {
             await select(child)
@@ -188,7 +228,7 @@ final class AppModel {
                     return
                 }
                 fail(error)
-            } else {
+            } else if !quiet {
                 playbackErrorMessage = error.localizedDescription
             }
         }
@@ -448,6 +488,7 @@ final class AppModel {
         isOfflineMode = true
         lastSyncedText = "Offline — showing saved videos"
         phase = .ready
+        startOfflineRetryLoop()
         return true
     }
 

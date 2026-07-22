@@ -5,8 +5,10 @@
 //  Created for HappiE.
 //
 
+import AVFoundation
 import Foundation
 import Observation
+import UIKit
 
 enum OfflineState: Equatable {
     case notDownloaded
@@ -112,6 +114,7 @@ final class OfflineStore {
                 tasks[videoId] = nil
                 if let bytes = succeeded {
                     states[videoId] = .downloaded(bytes: bytes)
+                    generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
                 } else {
                     states[videoId] = .notDownloaded
                 }
@@ -177,13 +180,52 @@ final class OfflineStore {
             try? data.write(to: metadataURL(for: video.id), options: .atomic)
         }
 
-        guard thumbnailFileURL(for: video.id) == nil, let remoteURL = video.thumbnailURL else { return }
+        guard thumbnailFileURL(for: video.id) == nil, let remoteURL = video.thumbnailURL else {
+            generateThumbnailFromLocalFileIfNeeded(videoId: video.id)
+            return
+        }
         let destination = thumbnailURL(for: video.id)
+        let videoId = video.id
         let session = session
         Task.detached(priority: .utility) {
-            guard let (data, response) = try? await session.data(from: remoteURL),
-                  let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode)
+            // The image was likely just displayed, so the shared URL cache can
+            // satisfy this even when the presigned URL has since expired.
+            if let cached = URLCache.shared.cachedResponse(for: URLRequest(url: remoteURL)),
+               !cached.data.isEmpty {
+                try? cached.data.write(to: destination, options: .atomic)
+                return
+            }
+            if let (data, response) = try? await session.data(from: remoteURL),
+               let http = response as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode) {
+                try? data.write(to: destination, options: .atomic)
+                return
+            }
+            // Remote fetch failed (expired URL, offline) — fall back to
+            // extracting the poster frame from the downloaded video itself.
+            await MainActor.run { [weak self] in
+                self?.generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
+            }
+        }
+    }
+
+    /// Extracts a poster frame from the local file — the server's thumbnail
+    /// is the same 0.5s frame, so this matches it without any network.
+    private func generateThumbnailFromLocalFileIfNeeded(videoId: UUID) {
+        let source = fileURL(for: videoId)
+        let destination = thumbnailURL(for: videoId)
+        guard FileManager.default.fileExists(atPath: source.path()),
+              !FileManager.default.fileExists(atPath: destination.path())
+        else {
+            return
+        }
+        Task.detached(priority: .utility) {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: source))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 1280, height: 720)
+            let time = CMTime(seconds: 0.5, preferredTimescale: 600)
+            guard let cgImage = try? await generator.image(at: time).image,
+                  let data = UIImage(cgImage: cgImage).jpegData(compressionQuality: 0.8)
             else {
                 return
             }
@@ -242,6 +284,7 @@ final class OfflineStore {
             guard let videoId = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { continue }
             let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
             states[videoId] = .downloaded(bytes: size)
+            generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
         }
     }
 
