@@ -42,6 +42,8 @@ final class AppModel {
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
+    /// Live network path status from NWPathMonitor.
+    private(set) var isNetworkAvailable = true
     private(set) var apiBaseURL: URL
 
     let history: WatchHistoryStore
@@ -79,11 +81,41 @@ final class AppModel {
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
             Task { @MainActor [weak self] in
-                guard let self, satisfied else { return }
-                await recoverFromOfflineIfNeeded()
+                guard let self else { return }
+                isNetworkAvailable = satisfied
+                if satisfied {
+                    await recoverFromOfflineIfNeeded()
+                } else {
+                    markOffline()
+                }
             }
         }
         pathMonitor.start(queue: DispatchQueue(label: "au.com.HappiE.network-monitor"))
+    }
+
+    /// Called when the app returns to the foreground — the network may have
+    /// changed (airplane mode toggled) while we were suspended.
+    func handleBecameActive() {
+        if !isNetworkAvailable {
+            markOffline()
+        } else if isOfflineMode {
+            Task {
+                await recoverFromOfflineIfNeeded()
+            }
+        }
+    }
+
+    /// Flips into offline mode without any network calls or phase flashes.
+    /// The already-loaded library stays on screen when we have one.
+    private func markOffline() {
+        guard !isOfflineMode else { return }
+        if phase == .ready, !videos.isEmpty {
+            isOfflineMode = true
+            lastSyncedText = "Offline — showing saved videos"
+            startOfflineRetryLoop()
+        } else if phase == .ready || phase == .failed {
+            _ = enterOfflineModeIfPossible(preferredChildId: selectedChild?.id)
+        }
     }
 
     /// Retries quietly every few seconds while offline — this also catches
@@ -101,7 +133,7 @@ final class AppModel {
     }
 
     private func recoverFromOfflineIfNeeded() async {
-        guard isOfflineMode else { return }
+        guard isOfflineMode, isNetworkAvailable else { return }
         if selectedChild != nil {
             await sync(showLoading: false, quiet: true)
         } else if let refreshed = try? await api.children(), !refreshed.isEmpty {
@@ -143,6 +175,12 @@ final class AppModel {
     }
 
     func loadChildren() async {
+        // Airplane mode at launch: go straight to the saved library instead
+        // of waiting on a doomed request.
+        if !isNetworkAvailable, enterOfflineModeIfPossible() {
+            return
+        }
+
         loadingMessage = "Finding profiles"
         phase = .loading
 
@@ -206,7 +244,22 @@ final class AppModel {
     private func sync(showLoading: Bool, quiet: Bool = false) async {
         guard let child = selectedChild else { return }
         guard let deviceId else {
-            await select(child)
+            if showLoading {
+                await select(child)
+            } else {
+                // Background path: never route through select(), which flips
+                // the whole screen into the loading phase.
+                do {
+                    let freshId = try await ensureDevice(for: child)
+                    let manifest = try await syncManifest(deviceId: freshId, child: child)
+                    apply(manifest, for: child)
+                    lastSyncedText = "Synced just now"
+                } catch {
+                    if !quiet {
+                        playbackErrorMessage = error.localizedDescription
+                    }
+                }
+            }
             return
         }
 
@@ -234,6 +287,8 @@ final class AppModel {
         }
     }
 
+    private static let offlinePlaybackMessage = "This video isn't saved on this device, so it needs the internet to play."
+
     func play(_ video: ManifestVideo) async {
         playbackErrorMessage = ""
         isPreparingPlayback = true
@@ -244,6 +299,9 @@ final class AppModel {
             let url: URL
             if let localURL = offline.localURL(for: video.id) {
                 url = localURL
+            } else if !isNetworkAvailable {
+                playbackErrorMessage = Self.offlinePlaybackMessage
+                return
             } else {
                 url = try await api.playbackURL(videoId: video.id).url
             }
@@ -272,6 +330,9 @@ final class AppModel {
             let url: URL
             if let localURL = offline.localURL(for: historyEntry.id) {
                 url = localURL
+            } else if !isNetworkAvailable {
+                playbackErrorMessage = Self.offlinePlaybackMessage
+                return
             } else {
                 url = try await api.playbackURL(videoId: historyEntry.id).url
             }
@@ -300,6 +361,9 @@ final class AppModel {
             let url: URL
             if let localURL = offline.localURL(for: video.id) {
                 url = localURL
+            } else if !isNetworkAvailable {
+                playbackErrorMessage = Self.offlinePlaybackMessage
+                return nil
             } else {
                 url = try await api.playbackURL(videoId: video.id).url
             }
