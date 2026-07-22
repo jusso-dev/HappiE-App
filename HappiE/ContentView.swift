@@ -190,7 +190,13 @@ private struct ProfilePickerView: View {
                     .foregroundStyle(HTheme.ink)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 22)], spacing: 22) {
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.fixed(220), spacing: 22),
+                    count: max(1, min(model.children.count, 3))
+                ),
+                spacing: 22
+            ) {
                 ForEach(model.children) { child in
                     Button {
                         Task {
@@ -206,8 +212,7 @@ private struct ProfilePickerView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 200)
+                        .frame(width: 220, height: 200)
                         .background(HTheme.surface)
                         .clipShape(.rect(cornerRadius: 24))
                     }
@@ -215,7 +220,6 @@ private struct ProfilePickerView: View {
                     .accessibilityLabel("Watch as \(child.name)")
                 }
             }
-            .frame(maxWidth: 760)
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

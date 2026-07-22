@@ -66,7 +66,10 @@ struct AvatarCircle: View {
     let size: CGFloat
 
     private var color: Color {
-        let index = abs(name.hashValue) % HTheme.avatarPalette.count
+        // Stable across launches, unlike String.hashValue which is
+        // randomized per process and made avatars change color.
+        let value = name.unicodeScalars.reduce(0) { $0 &* 31 &+ Int($1.value) }
+        let index = abs(value) % HTheme.avatarPalette.count
         return HTheme.avatarPalette[index]
     }
 

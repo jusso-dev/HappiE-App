@@ -380,6 +380,7 @@ final class AppModel {
         isOfflineMode = false
         saveLibraryCache(child: child, videos: manifest.videos)
         autoDownloadIfEnabled()
+        offline.backfillSidecars(from: manifest.videos)
     }
 
     var autoDownloadRequired: Bool {
@@ -428,13 +429,22 @@ final class AppModel {
     }
 
     /// Falls back to the last synced library when the server is unreachable,
-    /// so downloaded videos stay watchable offline.
+    /// so downloaded videos stay watchable offline. Saved videos missing from
+    /// the cached manifest (or with no cache at all) are rebuilt from their
+    /// on-disk sidecars.
     private func enterOfflineModeIfPossible(preferredChildId: UUID? = nil) -> Bool {
-        guard let cache = loadLibraryCache() else { return false }
-        if let preferredChildId, cache.child.id != preferredChildId { return false }
+        let cache = loadLibraryCache()
+        if let cache, let preferredChildId, cache.child.id != preferredChildId { return false }
 
-        selectedChild = cache.child
-        videos = cache.videos
+        var offlineVideos = cache?.videos ?? []
+        let knownIds = Set(offlineVideos.map(\.id))
+        offlineVideos += offline.downloadedVideosFromSidecars.filter { !knownIds.contains($0.id) }
+        guard !offlineVideos.isEmpty else { return false }
+
+        if let cache {
+            selectedChild = cache.child
+        }
+        videos = offlineVideos
         isOfflineMode = true
         lastSyncedText = "Offline — showing saved videos"
         phase = .ready

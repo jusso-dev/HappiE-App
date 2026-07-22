@@ -255,9 +255,13 @@ struct VideoCard: View {
                     await model.play(video)
                 }
             } label: {
-                VideoThumbnail(video: video, progress: historyEntry?.progressFraction)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
+                VideoThumbnail(
+                    video: video,
+                    progress: historyEntry?.progressFraction,
+                    localThumbnailURL: model.offline.thumbnailFileURL(for: video.id)
+                )
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
             .disabled(model.isPreparingPlayback || !isPlayable)
@@ -392,15 +396,17 @@ struct DownloadProgressRing: View {
 }
 
 /// Shared 16:9 thumbnail with duration badge and optional red progress bar.
+/// Prefers a locally cached image so saved videos render offline.
 struct VideoThumbnail: View {
     let video: ManifestVideo
     let progress: Double?
+    var localThumbnailURL: URL? = nil
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             HTheme.surface
 
-            if let thumbnailURL = video.thumbnailURL {
+            if let thumbnailURL = localThumbnailURL ?? video.thumbnailURL {
                 AsyncImage(url: thumbnailURL) { phase in
                     if let image = phase.image {
                         image
@@ -509,6 +515,9 @@ struct HistoryThumbnail: View {
     let entry: WatchHistoryEntry
 
     private var imageURL: URL? {
+        if let localURL = model.offline.thumbnailFileURL(for: entry.id) {
+            return localURL
+        }
         if let video = model.videos.first(where: { $0.id == entry.id }),
            let liveURL = video.thumbnailURL {
             return liveURL

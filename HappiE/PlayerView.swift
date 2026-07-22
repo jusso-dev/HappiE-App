@@ -508,12 +508,22 @@ private struct PlayerTopBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Button("Back", systemImage: "chevron.down", action: onClose)
-                .labelStyle(.iconOnly)
-                .font(.system(size: 30, weight: .semibold))
+            Button(action: onClose) {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 24, weight: .heavy))
+
+                    Text("Close")
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                }
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .accessibilityLabel("Close player")
+                .padding(.horizontal, 22)
+                .frame(height: 64)
+                .background(.black.opacity(0.55))
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+            }
+            .accessibilityLabel("Close the video")
 
             Text(title)
                 .font(.system(size: 26, weight: .bold, design: .rounded))

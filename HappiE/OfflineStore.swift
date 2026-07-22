@@ -24,6 +24,13 @@ enum OfflineState: Equatable {
     }
 }
 
+/// Sidecar saved next to each downloaded video so the title, duration, and
+/// thumbnail survive offline, independent of the synced manifest.
+struct OfflineVideoMetadata: Codable {
+    let title: String
+    let durationSeconds: Int?
+}
+
 /// Downloads videos to the device and serves them for offline playback.
 /// Files live in Application Support/OfflineVideos (excluded from backup);
 /// the store rescans on launch so downloads survive restarts.
@@ -77,6 +84,7 @@ final class OfflineStore {
         guard state(for: video.id) == .notDownloaded else { return }
         guard let asset = video.assets.first(where: { $0.kind == .mp4 }) else { return }
 
+        saveSidecar(for: video)
         states[video.id] = .downloading(0)
         let videoId = video.id
         let destination = fileURL(for: videoId)
@@ -134,6 +142,8 @@ final class OfflineStore {
     func removeDownload(videoId: UUID) {
         cancelDownload(videoId: videoId)
         try? FileManager.default.removeItem(at: fileURL(for: videoId))
+        try? FileManager.default.removeItem(at: metadataURL(for: videoId))
+        try? FileManager.default.removeItem(at: thumbnailURL(for: videoId))
         states[videoId] = .notDownloaded
     }
 
@@ -143,8 +153,84 @@ final class OfflineStore {
         }
     }
 
+    // MARK: - Offline metadata and thumbnails
+
+    /// Locally cached thumbnail for a downloaded video, if present.
+    func thumbnailFileURL(for videoId: UUID) -> URL? {
+        let url = thumbnailURL(for: videoId)
+        return FileManager.default.fileExists(atPath: url.path()) ? url : nil
+    }
+
+    func metadata(for videoId: UUID) -> OfflineVideoMetadata? {
+        guard let data = try? Data(contentsOf: metadataURL(for: videoId)) else { return nil }
+        return try? JSONDecoder().decode(OfflineVideoMetadata.self, from: data)
+    }
+
+    /// Writes the title/duration sidecar and caches the thumbnail image so a
+    /// saved video stays fully presentable with no network at all.
+    func saveSidecar(for video: ManifestVideo) {
+        let metadata = OfflineVideoMetadata(
+            title: video.displayTitle,
+            durationSeconds: video.durationSeconds
+        )
+        if let data = try? JSONEncoder().encode(metadata) {
+            try? data.write(to: metadataURL(for: video.id), options: .atomic)
+        }
+
+        guard thumbnailFileURL(for: video.id) == nil, let remoteURL = video.thumbnailURL else { return }
+        let destination = thumbnailURL(for: video.id)
+        let session = session
+        Task.detached(priority: .utility) {
+            guard let (data, response) = try? await session.data(from: remoteURL),
+                  let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode)
+            else {
+                return
+            }
+            try? data.write(to: destination, options: .atomic)
+        }
+    }
+
+    /// Repairs sidecars for videos downloaded before metadata/thumbnail
+    /// caching existed (or whose thumbnail fetch previously failed).
+    func backfillSidecars(from videos: [ManifestVideo]) {
+        for video in videos where state(for: video.id).isDownloaded {
+            if metadata(for: video.id) == nil || thumbnailFileURL(for: video.id) == nil {
+                saveSidecar(for: video)
+            }
+        }
+    }
+
+    /// Downloaded videos reconstructed from sidecars, for offline mode when
+    /// a video is no longer in (or there is no) cached manifest.
+    var downloadedVideosFromSidecars: [ManifestVideo] {
+        states.keys
+            .filter { state(for: $0).isDownloaded }
+            .compactMap { videoId in
+                let metadata = metadata(for: videoId)
+                return ManifestVideo(
+                    id: videoId,
+                    title: metadata?.title ?? "Saved video",
+                    description: "",
+                    durationSeconds: metadata?.durationSeconds,
+                    downloadPriority: .normal,
+                    expiresAt: nil,
+                    assets: []
+                )
+            }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
     private func fileURL(for videoId: UUID) -> URL {
         directory.appending(path: "\(videoId.uuidString).mp4")
+    }
+
+    private func metadataURL(for videoId: UUID) -> URL {
+        directory.appending(path: "\(videoId.uuidString).json")
+    }
+
+    private func thumbnailURL(for videoId: UUID) -> URL {
+        directory.appending(path: "\(videoId.uuidString).jpg")
     }
 
     private func scanExistingDownloads() {
