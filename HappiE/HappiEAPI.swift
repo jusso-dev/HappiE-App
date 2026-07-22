@@ -51,6 +51,26 @@ struct APIClient {
         try await request("/videos/\(videoId.uuidString)/playback-url")
     }
 
+    func reportWatchProgress(
+        childId: UUID,
+        videoId: UUID,
+        deviceId: UUID?,
+        positionSeconds: Int,
+        completed: Bool
+    ) async throws {
+        let _: OkResponse = try await request(
+            "/watch-progress",
+            method: "POST",
+            body: WatchProgressRequest(
+                childProfileId: childId,
+                videoId: videoId,
+                deviceId: deviceId,
+                positionSeconds: positionSeconds,
+                completed: completed
+            )
+        )
+    }
+
     private func request<Response: Decodable>(
         _ path: String,
         method: String = "GET"
@@ -109,12 +129,46 @@ struct APIClient {
     private var decoder: JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
+        // The server emits ISO 8601 with fractional seconds (chrono), which
+        // the stock .iso8601 strategy cannot parse.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            if let date = Self.isoFractionalFormatter.date(from: string) {
+                return date
+            }
+            // Sub-second precision doesn't matter here; drop the fraction
+            // when the formatter can't handle its length.
+            let stripped = string.replacingOccurrences(
+                of: #"\.\d+"#,
+                with: "",
+                options: .regularExpression
+            )
+            if let date = Self.isoFormatter.date(from: stripped) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unrecognized date: \(string)"
+            )
+        }
         return decoder
     }
+
+    private static let isoFractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let isoFormatter = ISO8601DateFormatter()
 }
 
 struct EmptyBody: Encodable {}
+
+struct OkResponse: Decodable {
+    let ok: Bool
+}
 
 struct ChildProfile: Identifiable, Codable, Equatable {
     let id: UUID
@@ -131,13 +185,21 @@ struct DeviceRegisterRequest: Encodable {
     let storageQuotaMb: Int
 }
 
+struct WatchProgressRequest: Encodable {
+    let childProfileId: UUID
+    let videoId: UUID
+    let deviceId: UUID?
+    let positionSeconds: Int
+    let completed: Bool
+}
+
 struct DeviceRegistration: Decodable {
     let id: UUID
     let childProfileId: UUID?
     let storageQuotaMb: Int
 }
 
-struct SyncManifest: Codable {
+struct SyncManifest: Decodable {
     let deviceId: UUID
     let childProfileId: UUID
     let storageQuotaMb: Int
@@ -217,5 +279,92 @@ enum APIError: LocalizedError {
         case .unexpectedPayload(let contentType):
             return "The API returned \(contentType), not JSON."
         }
+    }
+}
+
+extension ManifestVideo {
+    var displayTitle: String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return "Family video"
+        }
+
+        guard let url = URL(string: trimmedTitle), let host = url.host?.lowercased() else {
+            return trimmedTitle
+        }
+
+        if !url.schemeMatchesHTTP {
+            return trimmedTitle
+        }
+
+        if let descriptionTitle = meaningfulDescription {
+            return descriptionTitle
+        }
+
+        if host.contains("youtubekids") {
+            return "YouTube Kids video"
+        }
+
+        if host.contains("youtube") || host.contains("youtu.be") {
+            return "YouTube video"
+        }
+
+        return host.replacingOccurrences(of: "www.", with: "")
+    }
+
+    private var meaningfulDescription: String? {
+        let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDescription.isEmpty else {
+            return nil
+        }
+
+        let genericDescriptions = [
+            "imported from user-supplied youtube url.",
+            "family-approved video"
+        ]
+
+        guard !genericDescriptions.contains(trimmedDescription.lowercased()) else {
+            return nil
+        }
+
+        return trimmedDescription
+    }
+
+    var durationText: String {
+        Self.timestampText(seconds: durationSeconds)
+    }
+
+    static func timestampText(seconds: Int?) -> String {
+        guard let seconds, seconds > 0 else {
+            return ""
+        }
+
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let secs = seconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
+    }
+
+    func matches(searchText: String) -> Bool {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+
+        let haystack = "\(displayTitle) \(description)"
+        return query
+            .split(separator: " ")
+            .allSatisfy { haystack.localizedCaseInsensitiveContains($0) }
+    }
+}
+
+private extension URL {
+    var schemeMatchesHTTP: Bool {
+        guard let scheme = scheme?.lowercased() else {
+            return false
+        }
+
+        return scheme == "http" || scheme == "https"
     }
 }
