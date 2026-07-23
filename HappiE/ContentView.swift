@@ -46,7 +46,7 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 model.handleBecameActive()
-            } else {
+            } else if newPhase == .background {
                 model.recoverForChildUse()
             }
         }
