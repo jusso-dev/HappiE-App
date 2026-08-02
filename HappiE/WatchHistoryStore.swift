@@ -47,6 +47,7 @@ struct WatchHistoryEntry: Identifiable, Codable, Equatable {
 @Observable
 final class WatchHistoryStore {
     private(set) var entries: [WatchHistoryEntry] = []
+    private(set) var thumbnailRevision = 0
 
     private static let maxEntries = 100
 
@@ -144,7 +145,12 @@ final class WatchHistoryStore {
             else {
                 return
             }
-            try? data.write(to: destination, options: .atomic)
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                try? data.write(to: destination, options: .atomic)
+                guard FileManager.default.fileExists(atPath: destination.path()) else { return }
+                thumbnailRevision &+= 1
+            }
         }
     }
 

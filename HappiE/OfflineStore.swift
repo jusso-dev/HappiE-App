@@ -40,6 +40,7 @@ struct OfflineVideoMetadata: Codable {
 @Observable
 final class OfflineStore {
     private(set) var states: [UUID: OfflineState] = [:]
+    private(set) var thumbnailRevision = 0
 
     private let directory: URL
     private let session: URLSession
@@ -146,7 +147,6 @@ final class OfflineStore {
         cancelDownload(videoId: videoId)
         try? FileManager.default.removeItem(at: fileURL(for: videoId))
         try? FileManager.default.removeItem(at: metadataURL(for: videoId))
-        try? FileManager.default.removeItem(at: thumbnailURL(for: videoId))
         states[videoId] = .notDownloaded
     }
 
@@ -158,7 +158,7 @@ final class OfflineStore {
 
     // MARK: - Offline metadata and thumbnails
 
-    /// Locally cached thumbnail for a downloaded video, if present.
+    /// Locally cached thumbnail for a library video, if present.
     func thumbnailFileURL(for videoId: UUID) -> URL? {
         let url = thumbnailURL(for: videoId)
         return FileManager.default.fileExists(atPath: url.path()) ? url : nil
@@ -180,10 +180,32 @@ final class OfflineStore {
             try? data.write(to: metadataURL(for: video.id), options: .atomic)
         }
 
-        guard thumbnailFileURL(for: video.id) == nil, let remoteURL = video.thumbnailURL else {
-            generateThumbnailFromLocalFileIfNeeded(videoId: video.id)
+        cacheThumbnail(for: video, fallbackToLocalVideo: true)
+    }
+
+    /// Persists thumbnails for the whole synced library, not only downloaded
+    /// videos, so the offline library keeps its visual cards.
+    func cacheThumbnails(from videos: [ManifestVideo]) {
+        for video in videos where state(for: video.id) == .notDownloaded {
+            cacheThumbnail(for: video, fallbackToLocalVideo: false)
+        }
+    }
+
+    private func cacheThumbnail(for video: ManifestVideo, fallbackToLocalVideo: Bool) {
+        guard thumbnailFileURL(for: video.id) == nil else {
+            if fallbackToLocalVideo {
+                generateThumbnailFromLocalFileIfNeeded(videoId: video.id)
+            }
             return
         }
+
+        guard let remoteURL = video.thumbnailURL else {
+            if fallbackToLocalVideo {
+                generateThumbnailFromLocalFileIfNeeded(videoId: video.id)
+            }
+            return
+        }
+
         let destination = thumbnailURL(for: video.id)
         let videoId = video.id
         let session = session
@@ -192,21 +214,34 @@ final class OfflineStore {
             // satisfy this even when the presigned URL has since expired.
             if let cached = URLCache.shared.cachedResponse(for: URLRequest(url: remoteURL)),
                !cached.data.isEmpty {
-                try? cached.data.write(to: destination, options: .atomic)
+                Task { @MainActor [weak self] in
+                    self?.storeThumbnail(cached.data, at: destination)
+                }
                 return
             }
             if let (data, response) = try? await session.data(from: remoteURL),
                let http = response as? HTTPURLResponse,
                (200..<300).contains(http.statusCode) {
-                try? data.write(to: destination, options: .atomic)
+                Task { @MainActor [weak self] in
+                    self?.storeThumbnail(data, at: destination)
+                }
                 return
             }
             // Remote fetch failed (expired URL, offline) — fall back to
             // extracting the poster frame from the downloaded video itself.
-            await MainActor.run { [weak self] in
-                self?.generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
+            if fallbackToLocalVideo {
+                Task { @MainActor [weak self] in
+                    self?.generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
+                }
             }
         }
+    }
+
+    private func storeThumbnail(_ data: Data, at destination: URL) {
+        guard !data.isEmpty else { return }
+        try? data.write(to: destination, options: .atomic)
+        guard FileManager.default.fileExists(atPath: destination.path()) else { return }
+        thumbnailRevision &+= 1
     }
 
     /// Extracts a poster frame from the local file — the server's thumbnail
@@ -229,7 +264,9 @@ final class OfflineStore {
             else {
                 return
             }
-            try? data.write(to: destination, options: .atomic)
+            Task { @MainActor [weak self] in
+                self?.storeThumbnail(data, at: destination)
+            }
         }
     }
 

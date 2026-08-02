@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// YouTube-style home: brand bar, search, continue-watching shelf, video grid.
 struct HomeView: View {
@@ -258,7 +259,9 @@ struct VideoCard: View {
                 VideoThumbnail(
                     video: video,
                     progress: historyEntry?.progressFraction,
-                    localThumbnailURL: model.offline.thumbnailFileURL(for: video.id)
+                    localThumbnailURL: model.offline.thumbnailFileURL(for: video.id),
+                    isOffline: model.isOfflineMode,
+                    thumbnailRevision: model.offline.thumbnailRevision
                 )
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
@@ -401,24 +404,18 @@ struct VideoThumbnail: View {
     let video: ManifestVideo
     let progress: Double?
     var localThumbnailURL: URL? = nil
+    var isOffline = false
+    var thumbnailRevision = 0
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             HTheme.surface
 
-            if let thumbnailURL = localThumbnailURL ?? video.thumbnailURL {
-                AsyncImage(url: thumbnailURL) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        ThumbnailPlaceholder()
-                    }
-                }
-            } else {
-                ThumbnailPlaceholder()
-            }
+            OfflineFirstImage(
+                localURL: localThumbnailURL,
+                remoteURL: !isOffline && localThumbnailURL == nil ? video.thumbnailURL : nil
+            )
+            .id(thumbnailRevision)
 
             if !video.durationText.isEmpty {
                 DurationBadge(text: video.durationText)
@@ -443,6 +440,51 @@ struct ThumbnailPlaceholder: View {
             Image(systemName: "play.rectangle.fill")
                 .font(.system(size: 44, weight: .semibold))
                 .foregroundStyle(HTheme.line)
+        }
+    }
+}
+
+/// Renders disk-backed images without sending file URLs through AsyncImage.
+/// Remote images remain lazy; local images stay usable with no network.
+struct OfflineFirstImage: View {
+    let localURL: URL?
+    let remoteURL: URL?
+
+    @State private var localData: Data?
+
+    var body: some View {
+        Group {
+            if let localData, let image = UIImage(data: localData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if localURL != nil {
+                ThumbnailPlaceholder()
+            } else if let remoteURL {
+                AsyncImage(url: remoteURL) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ThumbnailPlaceholder()
+                    }
+                }
+            } else {
+                ThumbnailPlaceholder()
+            }
+        }
+        .task(id: localURL) {
+            guard let localURL, localURL.isFileURL else {
+                localData = nil
+                return
+            }
+
+            let data = await Task.detached(priority: .utility) {
+                try? Data(contentsOf: localURL)
+            }.value
+            guard !Task.isCancelled else { return }
+            localData = data
         }
     }
 }
@@ -508,40 +550,28 @@ private struct ContinueWatchingCard: View {
     }
 }
 
-/// Thumbnail for history entries: prefers the live library image, falls back
-/// to the locally cached copy so history still shows offline.
+/// Thumbnail for history entries: prefers the locally cached copy, then uses
+/// the live library image while online.
 struct HistoryThumbnail: View {
     @Bindable var model: AppModel
     let entry: WatchHistoryEntry
 
     private var imageURL: URL? {
-        if let localURL = model.offline.thumbnailFileURL(for: entry.id) {
-            return localURL
-        }
-        if let video = model.videos.first(where: { $0.id == entry.id }),
-           let liveURL = video.thumbnailURL {
-            return liveURL
-        }
-        return model.history.thumbnailFileURL(for: entry.id)
+        model.offline.thumbnailFileURL(for: entry.id)
+            ?? model.history.thumbnailFileURL(for: entry.id)
+    }
+
+    private var remoteImageURL: URL? {
+        guard !model.isOfflineMode, imageURL == nil else { return nil }
+        return model.videos.first(where: { $0.id == entry.id })?.thumbnailURL
     }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             HTheme.surface
 
-            if let imageURL {
-                AsyncImage(url: imageURL) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        ThumbnailPlaceholder()
-                    }
-                }
-            } else {
-                ThumbnailPlaceholder()
-            }
+            OfflineFirstImage(localURL: imageURL, remoteURL: remoteImageURL)
+                .id("\(model.offline.thumbnailRevision)-\(model.history.thumbnailRevision)")
 
             if !entry.durationText.isEmpty {
                 DurationBadge(text: entry.durationText)

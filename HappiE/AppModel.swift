@@ -43,7 +43,7 @@ final class AppModel {
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
     /// Live network path status from NWPathMonitor.
-    private(set) var isNetworkAvailable = true
+    private(set) var isNetworkAvailable = false
     private(set) var apiBaseURL: URL
 
     let history: WatchHistoryStore
@@ -54,6 +54,7 @@ final class AppModel {
     private let defaults: UserDefaults
     private var deviceId: UUID?
     private var hasStarted = false
+    private var didLoadOfflineSnapshot = false
     private var lastReportedProgress: [UUID: Double] = [:]
     private let pathMonitor = NWPathMonitor()
     private var offlineRetryTask: Task<Void, Never>?
@@ -119,7 +120,7 @@ final class AppModel {
             isOfflineMode = true
             lastSyncedText = "Offline — showing saved videos"
             startOfflineRetryLoop()
-        } else if phase == .ready || phase == .failed {
+        } else if phase == .loading || phase == .ready || phase == .failed {
             _ = enterOfflineModeIfPossible(preferredChildId: selectedChild?.id)
         }
     }
@@ -181,9 +182,12 @@ final class AppModel {
     }
 
     func loadChildren() async {
-        // Airplane mode at launch: go straight to the saved library instead
-        // of waiting on a doomed request.
-        if !isNetworkAvailable, enterOfflineModeIfPossible() {
+        // Load the last usable snapshot first. Network refresh happens after
+        // the cached library is visible, so startup never depends on reachability.
+        if !didLoadOfflineSnapshot, enterOfflineModeIfPossible() {
+            if isNetworkAvailable {
+                await recoverFromOfflineIfNeeded()
+            }
             return
         }
 
@@ -249,6 +253,10 @@ final class AppModel {
 
     private func sync(showLoading: Bool, quiet: Bool = false) async {
         guard let child = selectedChild else { return }
+        guard isNetworkAvailable else {
+            markOffline()
+            return
+        }
         guard let deviceId else {
             if showLoading {
                 await select(child)
@@ -456,6 +464,7 @@ final class AppModel {
         playbackErrorMessage = ""
         lastSyncedText = "Not synced yet"
         errorMessage = ""
+        didLoadOfflineSnapshot = false
         Task {
             await loadChildren()
         }
@@ -505,6 +514,7 @@ final class AppModel {
         isOfflineMode = false
         saveLibraryCache(child: child, videos: manifest.videos)
         autoDownloadIfEnabled()
+        offline.cacheThumbnails(from: manifest.videos)
         offline.backfillSidecars(from: manifest.videos)
     }
 
@@ -571,6 +581,7 @@ final class AppModel {
         }
         videos = offlineVideos
         isOfflineMode = true
+        didLoadOfflineSnapshot = true
         lastSyncedText = "Offline — showing saved videos"
         phase = .ready
         startOfflineRetryLoop()
