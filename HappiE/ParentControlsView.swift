@@ -15,6 +15,7 @@ struct ParentControlsView: View {
 
     @AppStorage("HappiEAutoplayNext") private var autoplayNext = true
     @AppStorage("HappiELoopVideo") private var loopEnabled = false
+    @AppStorage("HappiEPlaybackRate") private var playbackRate = 1.0
     @State private var apiBaseURLText = ""
     @State private var apiBaseURLError = ""
     @State private var isConfirmingClearHistory = false
@@ -55,6 +56,14 @@ struct ParentControlsView: View {
 
                     Toggle("Repeat the same video", isOn: $loopEnabled)
                         .tint(HTheme.accent)
+
+                    Picker("Playback speed", selection: $playbackRate) {
+                        Text("0.75x").tag(0.75)
+                        Text("1x").tag(1.0)
+                        Text("1.25x").tag(1.25)
+                        Text("1.5x").tag(1.5)
+                    }
+                    .pickerStyle(.segmented)
                 }
 
                 Section("Library") {

@@ -71,7 +71,7 @@ struct VideoPlayerScreen: View {
             Color.black
                 .ignoresSafeArea()
 
-            VideoPlayer(player: controller.player)
+            NativeVideoPlayer(controller: controller)
                 .ignoresSafeArea()
 
             Button {
@@ -538,6 +538,24 @@ private struct PlayerTopBar: View {
             AirPlayRouteButton()
                 .frame(width: 56, height: 56)
 
+            if controller.isPictureInPictureSupported {
+                Button {
+                    controller.togglePictureInPicture()
+                } label: {
+                    Image(systemName: controller.isPictureInPictureActive ? "pip.exit" : "pip.enter")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(.black.opacity(0.45))
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel(
+                    controller.isPictureInPictureActive
+                        ? "Stop Picture in Picture"
+                        : "Start Picture in Picture"
+                )
+            }
+
             PlayerVolumeControl(controller: controller)
                 .frame(width: 240)
         }
@@ -628,19 +646,22 @@ private struct SuggestedVideoStrip: View {
 }
 
 @MainActor
-final class PlayerController: ObservableObject {
+final class PlayerController: NSObject, ObservableObject, AVPictureInPictureControllerDelegate {
     let player: AVPlayer
 
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 1
     @Published var volume: Double = 1
+    @Published private(set) var isPictureInPictureActive = false
 
     private var timeObserver: Any?
     private var volumeObservation: NSKeyValueObservation?
+    private var pictureInPictureController: AVPictureInPictureController?
 
     init(url: URL) {
         player = AVPlayer(url: url)
+        super.init()
         player.volume = 1
         player.isMuted = false
         observeSystemVolume()
@@ -662,11 +683,55 @@ final class PlayerController: ObservableObject {
         Self.timeText(duration)
     }
 
+    var isPictureInPictureSupported: Bool {
+        AVPictureInPictureController.isPictureInPictureSupported()
+    }
+
+    func configurePictureInPicture(with playerLayer: AVPlayerLayer) {
+        guard pictureInPictureController == nil, isPictureInPictureSupported else { return }
+        let controller = AVPictureInPictureController(playerLayer: playerLayer)
+        controller.delegate = self
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        pictureInPictureController = controller
+    }
+
+    func togglePictureInPicture() {
+        guard let pictureInPictureController else { return }
+        if pictureInPictureController.isPictureInPictureActive {
+            pictureInPictureController.stopPictureInPicture()
+        } else if pictureInPictureController.isPictureInPicturePossible {
+            pictureInPictureController.startPictureInPicture()
+        }
+    }
+
+    nonisolated func pictureInPictureControllerDidStartPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor [weak self] in
+            self?.isPictureInPictureActive = true
+        }
+    }
+
+    nonisolated func pictureInPictureControllerDidStopPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor [weak self] in
+            self?.isPictureInPictureActive = false
+        }
+    }
+
     func play() {
         player.isMuted = false
         player.volume = 1
-        player.play()
+        // play() resets AVPlayer to 1x. Apply the grown-up's stored
+        // preference explicitly so resumes, seeks, and item changes keep it.
+        player.playImmediately(atRate: Self.storedPlaybackRate)
         isPlaying = true
+    }
+
+    private static var storedPlaybackRate: Float {
+        let value = UserDefaults.standard.object(forKey: "HappiEPlaybackRate") as? Double ?? 1
+        return Float([0.75, 1, 1.25, 1.5].contains(value) ? value : 1)
     }
 
     func replaceCurrentItem(with url: URL, startAt seconds: Double = 0) {
@@ -734,6 +799,38 @@ final class PlayerController: ObservableObject {
         ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded()))).isEmpty
             ? "0:00"
             : ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded())))
+    }
+}
+
+/// AVKit's player-layer PiP API keeps HappiE's custom kid controls while
+/// enabling both the top-bar PiP action and automatic PiP on app background.
+private struct NativeVideoPlayer: UIViewRepresentable {
+    @ObservedObject var controller: PlayerController
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.playerLayer.player = controller.player
+        view.playerLayer.videoGravity = .resizeAspect
+        controller.player.allowsExternalPlayback = true
+        controller.player.usesExternalPlaybackWhileExternalScreenIsActive = true
+        controller.configurePictureInPicture(with: view.playerLayer)
+        return view
+    }
+
+    func updateUIView(_ view: PlayerLayerView, context: Context) {
+        if view.playerLayer.player !== controller.player {
+            view.playerLayer.player = controller.player
+        }
+        controller.player.allowsExternalPlayback = true
+        controller.player.usesExternalPlaybackWhileExternalScreenIsActive = true
+    }
+}
+
+private final class PlayerLayerView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
     }
 }
 
