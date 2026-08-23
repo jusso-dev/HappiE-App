@@ -1,0 +1,9 @@
+{
+  "seriesId": "11111111-1111-1111-1111-111111111111",
+  "videos": [
+    { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1", "title": "Episode 1", "seasonNumber": 1, "episodeNumber": 1 },
+    { "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "title": "Unrelated movie" },
+    { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3", "title": "Episode 3", "seasonNumber": 1, "episodeNumber": 3 },
+    { "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2", "title": "Episode 2", "seasonNumber": 1, "episodeNumber": 2 }
+  ]
+}

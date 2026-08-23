@@ -213,9 +213,39 @@ struct ManifestVideo: Identifiable, Codable {
     let title: String
     let description: String
     let durationSeconds: Int?
+    let seriesId: UUID?
+    let seriesTitle: String?
+    let seasonNumber: Int?
+    let episodeNumber: Int?
     let downloadPriority: DownloadPriority
     let expiresAt: Date?
     let assets: [ManifestAsset]
+
+    init(
+        id: UUID,
+        title: String,
+        description: String,
+        durationSeconds: Int?,
+        seriesId: UUID? = nil,
+        seriesTitle: String? = nil,
+        seasonNumber: Int? = nil,
+        episodeNumber: Int? = nil,
+        downloadPriority: DownloadPriority,
+        expiresAt: Date?,
+        assets: [ManifestAsset]
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.durationSeconds = durationSeconds
+        self.seriesId = seriesId
+        self.seriesTitle = seriesTitle
+        self.seasonNumber = seasonNumber
+        self.episodeNumber = episodeNumber
+        self.downloadPriority = downloadPriority
+        self.expiresAt = expiresAt
+        self.assets = assets
+    }
 
     var thumbnailURL: URL? {
         assets.first(where: { $0.kind == .thumbnail })?.url
