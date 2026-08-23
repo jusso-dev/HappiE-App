@@ -47,8 +47,14 @@ struct APIClient {
         try await request("/devices/\(deviceId.uuidString)/sync", method: "POST")
     }
 
-    func playbackURL(videoId: UUID) async throws -> PlaybackURLResponse {
-        try await request("/videos/\(videoId.uuidString)/playback-url")
+    func playbackURL(videoId: UUID, audioIndex: Int? = nil, subtitleIndex: Int? = nil) async throws -> PlaybackURLResponse {
+        var components = URLComponents()
+        components.path = "/videos/\(videoId.uuidString)/playback-url"
+        components.queryItems = [
+            audioIndex.map { URLQueryItem(name: "audio_index", value: String($0)) },
+            subtitleIndex.map { URLQueryItem(name: "subtitle_index", value: String($0)) }
+        ].compactMap { $0 }
+        return try await request(components.string ?? components.path)
     }
 
     func reportWatchProgress(
@@ -56,7 +62,9 @@ struct APIClient {
         videoId: UUID,
         deviceId: UUID?,
         positionSeconds: Int,
-        completed: Bool
+        completed: Bool,
+        audioIndex: Int? = nil,
+        subtitleIndex: Int? = nil
     ) async throws {
         let _: OkResponse = try await request(
             "/watch-progress",
@@ -66,7 +74,9 @@ struct APIClient {
                 videoId: videoId,
                 deviceId: deviceId,
                 positionSeconds: positionSeconds,
-                completed: completed
+                completed: completed,
+                audioIndex: audioIndex,
+                subtitleIndex: subtitleIndex
             )
         )
     }
@@ -191,6 +201,8 @@ struct WatchProgressRequest: Encodable {
     let deviceId: UUID?
     let positionSeconds: Int
     let completed: Bool
+    let audioIndex: Int?
+    let subtitleIndex: Int?
 }
 
 struct DeviceRegistration: Decodable {
@@ -250,6 +262,8 @@ enum AssetKind: String, Codable {
 struct PlaybackURLResponse: Decodable {
     let url: URL
     let expiresInSeconds: Int
+    let audioTracks: [MediaTrack]?
+    let subtitleTracks: [MediaTrack]?
 }
 
 struct APIErrorResponse: Decodable {
