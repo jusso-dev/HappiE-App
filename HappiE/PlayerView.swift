@@ -38,6 +38,8 @@ struct VideoPlayerScreen: View {
     @State private var videoSwitchTask: Task<Void, Never>?
     @State private var playbackRequestID = UUID()
     @State private var isSwitchingVideo = false
+    @State private var playbackRecoveryAttempts = 0
+    @State private var playbackFailureMessage: String?
 
     init(
         item: PlaybackItem,
@@ -121,6 +123,11 @@ struct VideoPlayerScreen: View {
                     }
                 )
                 .zIndex(6)
+            }
+
+            if let playbackFailureMessage {
+                PlaybackFailureOverlay(message: playbackFailureMessage, onClose: close)
+                    .zIndex(7)
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -227,6 +234,8 @@ struct VideoPlayerScreen: View {
         showControls()
         playbackRecoveryTask?.cancel()
         playbackRecoveryTask = nil
+        playbackRecoveryAttempts = 0
+        playbackFailureMessage = nil
 
         let requestID = UUID()
         playbackRequestID = requestID
@@ -327,6 +336,12 @@ struct VideoPlayerScreen: View {
 
     private func recoverPlayback() {
         guard playbackRecoveryTask == nil, videoSwitchTask == nil else { return }
+        guard playbackRecoveryAttempts < 1 else {
+            controller.pause()
+            playbackFailureMessage = "This video can’t play with AVPlayer. Ask a parent to enable a compatibility player."
+            return
+        }
+        playbackRecoveryAttempts += 1
         let resumeAt = controller.currentTime
         let video = currentItem.video
         let requestID = UUID()
@@ -336,6 +351,8 @@ struct VideoPlayerScreen: View {
                 await MainActor.run {
                     if playbackRequestID == requestID {
                         playbackRecoveryTask = nil
+                        controller.pause()
+                        playbackFailureMessage = "This video can’t play with AVPlayer. Ask a parent to enable a compatibility player."
                     }
                 }
                 return
@@ -364,6 +381,35 @@ struct VideoPlayerScreen: View {
         videoSwitchTask = nil
         upNextTask = nil
         upNextVideo = nil
+    }
+}
+
+private struct PlaybackFailureOverlay: View {
+    let message: String
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 58, weight: .bold))
+
+            Text("Can’t play this video")
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+
+            Text(message)
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+
+            Button("Close player", action: onClose)
+                .buttonStyle(PrimaryButtonStyle())
+        }
+        .foregroundStyle(.white)
+        .padding(30)
+        .background(.black.opacity(0.86))
+        .clipShape(.rect(cornerRadius: 26))
+        .padding(30)
+        .accessibilityElement(children: .contain)
     }
 }
 
