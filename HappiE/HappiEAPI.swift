@@ -47,8 +47,13 @@ struct APIClient {
         try await request("/devices/\(deviceId.uuidString)/sync", method: "POST")
     }
 
-    func playbackURL(videoId: UUID) async throws -> PlaybackURLResponse {
-        try await request("/videos/\(videoId.uuidString)/playback-url")
+    func playbackURL(videoId: UUID, profile: PlaybackEngine = .preferred) async throws -> PlaybackURLResponse {
+        var components = URLComponents(
+            url: environment.baseURL.appending(path: "/videos/\(videoId.uuidString)/playback-url"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "device_profile", value: profile.rawValue)]
+        return try await request(components.url!)
     }
 
     func reportWatchProgress(
@@ -79,12 +84,24 @@ struct APIClient {
         return try await request(path, method: method, body: emptyBody)
     }
 
+    private func request<Response: Decodable>(_ url: URL) async throws -> Response {
+        try await request(url: url, method: "GET", body: Optional<EmptyBody>.none)
+    }
+
     private func request<Body: Encodable, Response: Decodable>(
         _ path: String,
         method: String = "GET",
         body: Body?
     ) async throws -> Response {
         let url = environment.baseURL.appending(path: path)
+        return try await request(url: url, method: method, body: body)
+    }
+
+    private func request<Body: Encodable, Response: Decodable>(
+        url: URL,
+        method: String,
+        body: Body?
+    ) async throws -> Response {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 12
