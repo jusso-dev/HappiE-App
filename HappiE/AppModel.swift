@@ -420,7 +420,14 @@ final class AppModel {
         guard completed || force || abs(position - lastReported) >= 10 else { return }
         lastReportedProgress[videoId] = position
 
-        history.updateProgress(videoId: videoId, positionSeconds: position, completed: completed)
+        // Patch the observable local shelf before doing any network work. The
+        // returned value also protects the server from a forced close callback
+        // that arrives just after a completion callback with `completed == false`.
+        guard let progress = history.updateProgress(
+            videoId: videoId,
+            positionSeconds: position,
+            completed: completed
+        ) else { return }
 
         guard let child = selectedChild else { return }
         let api = api
@@ -430,8 +437,8 @@ final class AppModel {
                 childId: child.id,
                 videoId: videoId,
                 deviceId: deviceId,
-                positionSeconds: Int(position),
-                completed: completed
+                positionSeconds: Int(progress.positionSeconds),
+                completed: progress.completed
             )
         }
     }

@@ -99,12 +99,20 @@ final class WatchHistoryStore {
         }
     }
 
-    func updateProgress(videoId: UUID, positionSeconds: Double, completed: Bool) {
-        guard var entry = entries.first(where: { $0.id == videoId }) else { return }
-        entry.positionSeconds = positionSeconds
+    /// Applies a player tick and returns the canonical local value. Completion
+    /// is intentionally sticky: the player's close/disappear callbacks can run
+    /// after the end callback and must not turn a watched item back into a 99%
+    /// resume item (or send that stale state to the server).
+    @discardableResult
+    func updateProgress(videoId: UUID, positionSeconds: Double, completed: Bool) -> WatchHistoryEntry? {
+        guard var entry = entries.first(where: { $0.id == videoId }) else { return nil }
+        if positionSeconds.isFinite {
+            entry.positionSeconds = max(positionSeconds, 0)
+        }
         entry.completed = completed || entry.completed
         entry.lastWatchedAt = Date()
         upsert(entry)
+        return entry
     }
 
     func clear() {
