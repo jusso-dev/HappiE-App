@@ -65,7 +65,7 @@ struct VideoPlayerScreen: View {
     }
 
     private var nextVideo: ManifestVideo? {
-        suggestedVideos.first
+        VideoQueue.next(after: currentItem.video, in: playerVideos)
     }
 
     var body: some View {

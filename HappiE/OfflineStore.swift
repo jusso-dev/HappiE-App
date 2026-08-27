@@ -31,6 +31,10 @@ enum OfflineState: Equatable {
 struct OfflineVideoMetadata: Codable {
     let title: String
     let durationSeconds: Int?
+    let seriesId: UUID?
+    let seriesTitle: String?
+    let seasonNumber: Int?
+    let episodeNumber: Int?
 }
 
 /// Downloads videos to the device and serves them for offline playback.
@@ -174,7 +178,11 @@ final class OfflineStore {
     func saveSidecar(for video: ManifestVideo) {
         let metadata = OfflineVideoMetadata(
             title: video.displayTitle,
-            durationSeconds: video.durationSeconds
+            durationSeconds: video.durationSeconds,
+            seriesId: video.seriesId,
+            seriesTitle: video.seriesTitle,
+            seasonNumber: video.seasonNumber,
+            episodeNumber: video.episodeNumber
         )
         if let data = try? JSONEncoder().encode(metadata) {
             try? data.write(to: metadataURL(for: video.id), options: .atomic)
@@ -292,6 +300,10 @@ final class OfflineStore {
                     title: metadata?.title ?? "Saved video",
                     description: "",
                     durationSeconds: metadata?.durationSeconds,
+                    seriesId: metadata?.seriesId,
+                    seriesTitle: metadata?.seriesTitle,
+                    seasonNumber: metadata?.seasonNumber,
+                    episodeNumber: metadata?.episodeNumber,
                     downloadPriority: .normal,
                     expiresAt: nil,
                     assets: []
