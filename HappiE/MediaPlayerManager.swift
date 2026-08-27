@@ -48,12 +48,16 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     @Published private(set) var stalledEvent = UUID()
     @Published private(set) var engine: PlaybackEngine
     @Published private(set) var isPictureInPictureActive = false
+    @Published private(set) var audioTracks: [MediaTrack] = []
+    @Published private(set) var subtitleTracks: [MediaTrack] = []
 
     private var currentURL: URL
     private var timeObserver: Any?
     private var volumeObservation: NSKeyValueObservation?
     private var notifications: [NSObjectProtocol] = []
     private var pictureInPictureController: AVPictureInPictureController?
+    private var audioGroup: AVMediaSelectionGroup?
+    private var subtitleGroup: AVMediaSelectionGroup?
 
 #if canImport(MobileVLCKit)
     fileprivate let vlcPlayer = VLCMediaPlayer()
@@ -175,6 +179,52 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         load(url: url, startAt: seconds, autoplay: true)
     }
 
+    @discardableResult
+    func selectTrack(type: MediaTrackType, streamIndex: Int) -> Bool {
+        guard !usesCompatibilityPlayer, let item = player.currentItem else { return false }
+        let group = type == .audio ? audioGroup : subtitleGroup
+        guard let group else { return false }
+        if streamIndex == -1 {
+            item.select(nil, in: group)
+            return true
+        }
+        let tracks = type == .audio ? audioTracks : subtitleTracks
+        let map = MediaTrackIndexMap(streamIndexes: tracks.map(\.index))
+        guard let offset = map.optionOffset(forStreamIndex: streamIndex),
+              group.options.indices.contains(offset) else { return false }
+        item.select(group.options[offset], in: group)
+        return true
+    }
+
+    private func refreshMediaOptions() {
+        audioTracks = []
+        subtitleTracks = []
+        audioGroup = nil
+        subtitleGroup = nil
+        guard !usesCompatibilityPlayer, let item = player.currentItem else { return }
+        Task { @MainActor [weak self, weak item] in
+            guard let self, let item else { return }
+            let audio = try? await item.asset.loadMediaSelectionGroup(for: .audible)
+            let subtitles = try? await item.asset.loadMediaSelectionGroup(for: .legible)
+            guard item === player.currentItem else { return }
+            audioGroup = audio
+            subtitleGroup = subtitles
+            audioTracks = Self.tracks(from: audio)
+            subtitleTracks = Self.tracks(from: subtitles)
+        }
+    }
+
+    private static func tracks(from group: AVMediaSelectionGroup?) -> [MediaTrack] {
+        (group?.options ?? []).enumerated().map { offset, option in
+            MediaTrack(
+                index: offset,
+                title: option.displayName,
+                language: option.extendedLanguageTag,
+                requiresRebuild: false
+            )
+        }
+    }
+
     func togglePlayback() { isPlaying ? pause() : play() }
     func jump(by seconds: Double) { seek(to: currentTime + seconds) }
 
@@ -212,7 +262,13 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
 #endif
             player.pause()
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
-            guard autoplay else { return }
+            refreshMediaOptions()
+            if !autoplay {
+                if seconds > 0 {
+                    player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+                }
+                return
+            }
             if seconds > 0 {
                 player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.play() }

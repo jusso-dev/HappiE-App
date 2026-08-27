@@ -16,9 +16,10 @@ struct VideoPlayerScreen: View {
     let item: PlaybackItem
     let videos: [ManifestVideo]
     let onSelectVideo: (ManifestVideo) async -> PlaybackItem?
+    let onSelectTracks: (ManifestVideo, Int?, Int) async -> PlaybackItem?
     let onRefreshVideos: () async -> [ManifestVideo]
-    /// (videoId, positionSeconds, completed, force)
-    let onProgress: (UUID, Double, Bool, Bool) -> Void
+    /// (videoId, positionSeconds, completed, force, audioIndex, subtitleIndex)
+    let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -41,18 +42,22 @@ struct VideoPlayerScreen: View {
     @State private var isSwitchingVideo = false
     @State private var playbackRecoveryAttempts = 0
     @State private var playbackFailureMessage: String?
+    @State private var isShowingTrackGate = false
+    @State private var isShowingTrackPicker = false
 
     init(
         item: PlaybackItem,
         videos: [ManifestVideo],
         onSelectVideo: @escaping (ManifestVideo) async -> PlaybackItem?,
+        onSelectTracks: @escaping (ManifestVideo, Int?, Int) async -> PlaybackItem?,
         onRefreshVideos: @escaping () async -> [ManifestVideo],
-        onProgress: @escaping (UUID, Double, Bool, Bool) -> Void,
+        onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.item = item
         self.videos = videos
         self.onSelectVideo = onSelectVideo
+        self.onSelectTracks = onSelectTracks
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
         self.onClose = onClose
@@ -93,6 +98,7 @@ struct VideoPlayerScreen: View {
                     loopEnabled: $loopEnabled,
                     autoplayNext: $autoplayNext,
                     onClose: close,
+                    onOpenTracks: { isShowingTrackGate = true },
                     onNext: playNextVideo,
                     onSelect: selectVideo(_:)
                 )
@@ -145,12 +151,12 @@ struct VideoPlayerScreen: View {
         .onDisappear {
             cancelPlayerTasks()
             UIApplication.shared.isIdleTimerDisabled = false
-            onProgress(currentItem.video.id, controller.currentTime, false, true)
+            reportProgress(position: controller.currentTime, force: true)
             controller.pause()
         }
         .onChange(of: controller.currentTime) {
             guard controller.isPlaying else { return }
-            onProgress(currentItem.video.id, controller.currentTime, false, false)
+            reportProgress(position: controller.currentTime)
         }
         .onChange(of: controller.endedEvent) {
             handleVideoEnded()
@@ -160,6 +166,23 @@ struct VideoPlayerScreen: View {
         }
         .onChange(of: compatibilityPlayer) {
             controller.setEngine(compatibilityPlayer ? .compatibility : .apple)
+        }
+        .sheet(isPresented: $isShowingTrackGate) {
+            ParentGateView {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    isShowingTrackPicker = true
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingTrackPicker) {
+            TrackPickerView(
+                audioTracks: controller.audioTracks.isEmpty ? currentItem.audioTracks : controller.audioTracks,
+                subtitleTracks: controller.subtitleTracks.isEmpty ? currentItem.subtitleTracks : controller.subtitleTracks,
+                selectedAudioIndex: currentItem.selectedAudioIndex,
+                selectedSubtitleIndex: currentItem.selectedSubtitleIndex,
+                onSelect: selectTrack(type:index:)
+            )
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
@@ -180,8 +203,42 @@ struct VideoPlayerScreen: View {
 #endif
     }
 
+    private func reportProgress(position: Double, completed: Bool = false, force: Bool = false) {
+        onProgress(currentItem.video.id, position, completed, force, currentItem.selectedAudioIndex, currentItem.selectedSubtitleIndex)
+    }
+
+    private func selectTrack(type: MediaTrackType, index: Int) {
+        let previousTime = controller.currentTime
+        let displayedTracks = type == .audio
+            ? (controller.audioTracks.isEmpty ? currentItem.audioTracks : controller.audioTracks)
+            : (controller.subtitleTracks.isEmpty ? currentItem.subtitleTracks : controller.subtitleTracks)
+        let requiresRebuild = displayedTracks.first(where: { $0.index == index })?.requiresRebuild == true
+        if !requiresRebuild, controller.selectTrack(type: type, streamIndex: index) {
+            if type == .audio { currentItem.selectedAudioIndex = index }
+            else { currentItem.selectedSubtitleIndex = index }
+            reportProgress(position: previousTime, force: true)
+            return
+        }
+
+        let audioIndex = type == .audio ? index : currentItem.selectedAudioIndex
+        let subtitleIndex = type == .subtitle ? index : currentItem.selectedSubtitleIndex
+        guard videoSwitchTask == nil else { return }
+        videoSwitchTask = Task {
+            let rebuilt = await onSelectTracks(currentItem.video, audioIndex, subtitleIndex)
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                if var rebuilt {
+                    rebuilt.resumeAt = previousTime
+                    currentItem = rebuilt
+                    controller.replaceCurrentItem(with: rebuilt.url, startAt: previousTime)
+                }
+                videoSwitchTask = nil
+            }
+        }
+    }
+
     private func handleVideoEnded() {
-        onProgress(currentItem.video.id, controller.duration, true, false)
+        reportProgress(position: controller.duration, completed: true)
 
         if loopEnabled {
             controller.seek(to: 0)
@@ -229,7 +286,7 @@ struct VideoPlayerScreen: View {
 
     private func close() {
         cancelPlayerTasks()
-        onProgress(currentItem.video.id, controller.currentTime, false, true)
+        reportProgress(position: controller.currentTime, force: true)
         controller.pause()
         onClose()
         dismiss()
@@ -345,7 +402,7 @@ struct VideoPlayerScreen: View {
         let requestID = UUID()
         playbackRequestID = requestID
         playbackRecoveryTask = Task {
-            guard let refreshedItem = await onSelectVideo(video) else {
+            guard let refreshedItem = await onSelectTracks(video, currentItem.selectedAudioIndex, currentItem.selectedSubtitleIndex) else {
                 await MainActor.run {
                     if playbackRequestID == requestID {
                         playbackRecoveryTask = nil
@@ -494,6 +551,58 @@ private struct UpNextOverlay: View {
     }
 }
 
+private struct TrackPickerView: View {
+    let audioTracks: [MediaTrack]
+    let subtitleTracks: [MediaTrack]
+    let selectedAudioIndex: Int?
+    let selectedSubtitleIndex: Int
+    let onSelect: (MediaTrackType, Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if audioTracks.count > 1 {
+                    Section("Audio") {
+                        trackButton(title: "Off", type: .audio, index: -1, selected: selectedAudioIndex == -1)
+                        ForEach(audioTracks) { track in
+                            trackButton(title: track.displayTitle, type: .audio, index: track.index, selected: selectedAudioIndex == track.index)
+                        }
+                    }
+                }
+                if !subtitleTracks.isEmpty {
+                    Section("Subtitles") {
+                        trackButton(title: "Off", type: .subtitle, index: -1, selected: selectedSubtitleIndex == -1)
+                        ForEach(subtitleTracks) { track in
+                            trackButton(title: track.displayTitle, type: .subtitle, index: track.index, selected: selectedSubtitleIndex == track.index)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Audio & Subtitles")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func trackButton(title: String, type: MediaTrackType, index: Int, selected: Bool) -> some View {
+        Button {
+            onSelect(type, index)
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if selected { Image(systemName: "checkmark") }
+            }
+        }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
 private struct PlayerChrome: View {
     let item: PlaybackItem
     let videos: [ManifestVideo]
@@ -501,6 +610,7 @@ private struct PlayerChrome: View {
     @Binding var loopEnabled: Bool
     @Binding var autoplayNext: Bool
     let onClose: () -> Void
+    let onOpenTracks: () -> Void
     let onNext: () -> Void
     let onSelect: (ManifestVideo) -> Void
 
@@ -519,6 +629,8 @@ private struct PlayerChrome: View {
                     title: item.video.displayTitle,
                     controller: controller,
                     autoplayNext: $autoplayNext,
+                    hasTrackChoices: controller.audioTracks.count > 1 || !controller.subtitleTracks.isEmpty || item.audioTracks.count > 1 || !item.subtitleTracks.isEmpty,
+                    onOpenTracks: onOpenTracks,
                     onClose: onClose
                 )
 
@@ -549,6 +661,8 @@ private struct PlayerTopBar: View {
     let title: String
     @ObservedObject var controller: MediaPlayerManager
     @Binding var autoplayNext: Bool
+    let hasTrackChoices: Bool
+    let onOpenTracks: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -575,6 +689,10 @@ private struct PlayerTopBar: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
+                .onLongPressGesture(minimumDuration: 0.8) {
+                    if hasTrackChoices { onOpenTracks() }
+                }
+                .accessibilityHint(hasTrackChoices ? "Long press for audio and subtitles" : "")
 
             Spacer()
 

@@ -49,7 +49,9 @@ struct APIClient {
 
     func playbackURL(
         videoId: UUID,
-        profile: PlaybackDeviceProfile
+        profile: PlaybackDeviceProfile,
+        audioIndex: Int? = nil,
+        subtitleIndex: Int? = nil
     ) async throws -> PlaybackURLResponse {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -58,12 +60,17 @@ struct APIClient {
             throw APIError.invalidResponse
         }
 
-        // Keep the existing GET endpoint (and compatibility with today's API)
-        // while attaching the profile for servers that can choose direct play,
-        // remux, or transcode. URLComponents performs the required escaping.
+        var queryItems = [URLQueryItem(name: "device_profile", value: encodedProfile)]
+        if let audioIndex {
+            queryItems.append(URLQueryItem(name: "audio_index", value: String(audioIndex)))
+        }
+        if let subtitleIndex {
+            queryItems.append(URLQueryItem(name: "subtitle_index", value: String(subtitleIndex)))
+        }
+
         return try await request(
             "/videos/\(videoId.uuidString)/playback-url",
-            queryItems: [URLQueryItem(name: "device_profile", value: encodedProfile)]
+            queryItems: queryItems
         )
     }
 
@@ -72,7 +79,9 @@ struct APIClient {
         videoId: UUID,
         deviceId: UUID?,
         positionSeconds: Int,
-        completed: Bool
+        completed: Bool,
+        audioIndex: Int? = nil,
+        subtitleIndex: Int? = nil
     ) async throws {
         let _: OkResponse = try await request(
             "/watch-progress",
@@ -82,7 +91,9 @@ struct APIClient {
                 videoId: videoId,
                 deviceId: deviceId,
                 positionSeconds: positionSeconds,
-                completed: completed
+                completed: completed,
+                audioIndex: audioIndex,
+                subtitleIndex: subtitleIndex
             )
         )
     }
@@ -228,6 +239,8 @@ struct WatchProgressRequest: Encodable {
     let deviceId: UUID?
     let positionSeconds: Int
     let completed: Bool
+    let audioIndex: Int?
+    let subtitleIndex: Int?
 }
 
 struct DeviceRegistration: Decodable {
@@ -349,6 +362,8 @@ enum AssetKind: String, Codable {
 struct PlaybackURLResponse: Decodable {
     let url: URL
     let expiresInSeconds: Int
+    let audioTracks: [MediaTrack]?
+    let subtitleTracks: [MediaTrack]?
 }
 
 struct APIErrorResponse: Decodable {

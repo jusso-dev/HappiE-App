@@ -16,6 +16,10 @@ struct PlaybackItem: Identifiable {
     let video: ManifestVideo
     let url: URL
     var resumeAt: Double = 0
+    var audioTracks: [MediaTrack] = []
+    var subtitleTracks: [MediaTrack] = []
+    var selectedAudioIndex: Int? = nil
+    var selectedSubtitleIndex: Int = -1
 }
 
 @MainActor
@@ -318,18 +322,22 @@ final class AppModel {
 
         do {
             try configurePlaybackAudio()
+            let response: PlaybackURLResponse?
             let url: URL
             if let localURL = offline.localURL(for: video.id) {
                 url = localURL
+                response = nil
             } else if !isNetworkAvailable {
                 playbackErrorMessage = Self.offlinePlaybackMessage
                 return
             } else {
-                url = try await api.playbackURL(videoId: video.id, profile: playbackProfile).url
+                let playback = try await api.playbackURL(videoId: video.id, profile: playbackProfile)
+                response = playback
+                url = playback.url
             }
             let resumeAt = history.entry(for: video.id)?.resumePosition ?? 0
             history.recordPlayback(of: video, serverBaseURL: apiBaseURL)
-            playbackItem = PlaybackItem(video: video, url: url, resumeAt: resumeAt)
+            playbackItem = PlaybackItem(video: video, url: url, resumeAt: resumeAt, audioTracks: response?.audioTracks ?? [], subtitleTracks: response?.subtitleTracks ?? [])
         } catch {
             playbackErrorMessage = error.localizedDescription
             markOfflineOnConnectivityFailure(error)
@@ -377,22 +385,31 @@ final class AppModel {
         }
     }
 
-    func preparePlaybackItem(for video: ManifestVideo) async -> PlaybackItem? {
+    func preparePlaybackItem(for video: ManifestVideo, audioIndex: Int? = nil, subtitleIndex: Int? = nil) async -> PlaybackItem? {
         playbackErrorMessage = ""
 
         do {
             try configurePlaybackAudio()
+            let response: PlaybackURLResponse?
             let url: URL
             if let localURL = offline.localURL(for: video.id) {
                 url = localURL
+                response = nil
             } else if !isNetworkAvailable {
                 playbackErrorMessage = Self.offlinePlaybackMessage
                 return nil
             } else {
-                url = try await api.playbackURL(videoId: video.id, profile: playbackProfile).url
+                let playback = try await api.playbackURL(
+                    videoId: video.id,
+                    profile: playbackProfile,
+                    audioIndex: audioIndex,
+                    subtitleIndex: subtitleIndex
+                )
+                response = playback
+                url = playback.url
             }
             history.recordPlayback(of: video, serverBaseURL: apiBaseURL)
-            return PlaybackItem(video: video, url: url)
+            return PlaybackItem(video: video, url: url, audioTracks: response?.audioTracks ?? [], subtitleTracks: response?.subtitleTracks ?? [], selectedAudioIndex: audioIndex, selectedSubtitleIndex: subtitleIndex ?? -1)
         } catch {
             playbackErrorMessage = error.localizedDescription
             markOfflineOnConnectivityFailure(error)
@@ -419,7 +436,7 @@ final class AppModel {
     /// Saves progress locally and mirrors it to the server, throttled so the
     /// per-tick player callbacks don't hammer either one. `force` bypasses
     /// the throttle so closing the player never loses the resume position.
-    func reportPlaybackProgress(videoId: UUID, position: Double, completed: Bool, force: Bool = false) {
+    func reportPlaybackProgress(videoId: UUID, position: Double, completed: Bool, force: Bool = false, audioIndex: Int? = nil, subtitleIndex: Int? = nil) {
         let lastReported = lastReportedProgress[videoId] ?? -100
         guard completed || force || abs(position - lastReported) >= 10 else { return }
         lastReportedProgress[videoId] = position
@@ -442,7 +459,9 @@ final class AppModel {
                 videoId: videoId,
                 deviceId: deviceId,
                 positionSeconds: Int(progress.positionSeconds),
-                completed: progress.completed
+                completed: progress.completed,
+                audioIndex: audioIndex,
+                subtitleIndex: subtitleIndex
             )
         }
     }
