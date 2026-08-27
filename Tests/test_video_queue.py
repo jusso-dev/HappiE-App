@@ -56,7 +56,7 @@ class VideoQueueTests(unittest.TestCase):
         ended = source.split("private func handleVideoEnded()", 1)[1].split(
             "private func startUpNextCountdown", 1
         )[0]
-        self.assertLess(ended.index("onProgress("), ended.index("startUpNextCountdown"))
+        self.assertLess(ended.index("reportProgress("), ended.index("startUpNextCountdown"))
 
 
 if __name__ == "__main__":

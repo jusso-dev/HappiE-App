@@ -48,6 +48,20 @@ The backend must also use LAN-reachable `PUBLIC_API_BASE_URL` and `R2_ENDPOINT` 
 - Watch progress mirrored to the server via `POST /watch-progress`.
 - Library sync from `POST /devices/:id/sync`, with the device registration reused across launches.
 - Native AirPlay route picker and volume control.
+- One playback session with AVPlayer by default and optional MobileVLCKit compatibility playback.
+
+## Optional VLC compatibility player
+
+The app compiles and runs without VLC. To enable MKV, DTS, and ASS playback, link the
+`MobileVLCKit` module to the HappiE target using the distribution and licence terms from
+the [VideoLAN VLCKit project](https://code.videolan.org/videolan/VLCKit). A parent can
+then enable **Compatibility player (VLC)** in Parent controls. For local validation,
+serve a parent-owned MKV through the normal HappiE playback URL flow; no third-party
+media fixture is checked into this repository.
+
+Playback URL requests include `device_profile=apple` (the default) or
+`device_profile=compatibility`, allowing the API to prefer MP4/HLS for AVPlayer while
+returning original containers to VLC-aware clients.
 
 ## Offline Downloads
 

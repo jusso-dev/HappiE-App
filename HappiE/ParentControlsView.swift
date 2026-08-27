@@ -15,6 +15,8 @@ struct ParentControlsView: View {
 
     @AppStorage("HappiEAutoplayNext") private var autoplayNext = true
     @AppStorage("HappiELoopVideo") private var loopEnabled = false
+    @AppStorage(PlaybackEngine.defaultsKey) private var compatibilityPlayer = false
+    @AppStorage("HappiEPlaybackRate") private var playbackRate = 1.0
     @State private var apiBaseURLText = ""
     @State private var apiBaseURLError = ""
     @State private var isConfirmingClearHistory = false
@@ -49,12 +51,34 @@ struct ParentControlsView: View {
                     }
                 }
 
-                Section("Playback") {
+                Section {
+                    Toggle("Compatibility player (VLC)", isOn: $compatibilityPlayer)
+                        .tint(HTheme.accent)
+#if !canImport(MobileVLCKit)
+                        .disabled(true)
+#endif
+
                     Toggle("Autoplay next video", isOn: $autoplayNext)
                         .tint(HTheme.accent)
 
                     Toggle("Repeat the same video", isOn: $loopEnabled)
                         .tint(HTheme.accent)
+
+                    Picker("Playback speed", selection: $playbackRate) {
+                        Text("0.75x").tag(0.75)
+                        Text("1x").tag(1.0)
+                        Text("1.25x").tag(1.25)
+                        Text("1.5x").tag(1.5)
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text("Playback")
+                } footer: {
+#if canImport(MobileVLCKit)
+                    Text("Use VLC for formats such as MKV, DTS, and ASS subtitles. Apple player remains the default.")
+#else
+                    Text("VLC support is not included in this build. Apple player will be used until MobileVLCKit is linked.")
+#endif
                 }
 
                 Section("Library") {

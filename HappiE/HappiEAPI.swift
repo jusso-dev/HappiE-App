@@ -49,7 +49,9 @@ struct APIClient {
 
     func playbackURL(
         videoId: UUID,
-        profile: PlaybackDeviceProfile
+        profile: PlaybackDeviceProfile,
+        audioIndex: Int? = nil,
+        subtitleIndex: Int? = nil
     ) async throws -> PlaybackURLResponse {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -58,12 +60,17 @@ struct APIClient {
             throw APIError.invalidResponse
         }
 
-        // Keep the existing GET endpoint (and compatibility with today's API)
-        // while attaching the profile for servers that can choose direct play,
-        // remux, or transcode. URLComponents performs the required escaping.
+        var queryItems = [URLQueryItem(name: "device_profile", value: encodedProfile)]
+        if let audioIndex {
+            queryItems.append(URLQueryItem(name: "audio_index", value: String(audioIndex)))
+        }
+        if let subtitleIndex {
+            queryItems.append(URLQueryItem(name: "subtitle_index", value: String(subtitleIndex)))
+        }
+
         return try await request(
             "/videos/\(videoId.uuidString)/playback-url",
-            queryItems: [URLQueryItem(name: "device_profile", value: encodedProfile)]
+            queryItems: queryItems
         )
     }
 
@@ -72,7 +79,9 @@ struct APIClient {
         videoId: UUID,
         deviceId: UUID?,
         positionSeconds: Int,
-        completed: Bool
+        completed: Bool,
+        audioIndex: Int? = nil,
+        subtitleIndex: Int? = nil
     ) async throws {
         let _: OkResponse = try await request(
             "/watch-progress",
@@ -82,7 +91,9 @@ struct APIClient {
                 videoId: videoId,
                 deviceId: deviceId,
                 positionSeconds: positionSeconds,
-                completed: completed
+                completed: completed,
+                audioIndex: audioIndex,
+                subtitleIndex: subtitleIndex
             )
         )
     }
@@ -94,6 +105,10 @@ struct APIClient {
     ) async throws -> Response {
         let emptyBody: EmptyBody? = nil
         return try await request(path, method: method, queryItems: queryItems, body: emptyBody)
+    }
+
+    private func request<Response: Decodable>(_ url: URL) async throws -> Response {
+        try await request(url: url, method: "GET", body: Optional<EmptyBody>.none)
     }
 
     private func request<Body: Encodable, Response: Decodable>(
@@ -110,6 +125,14 @@ struct APIClient {
         guard let url = components.url else {
             throw APIError.invalidResponse
         }
+        return try await request(url: url, method: method, body: body)
+    }
+
+    private func request<Body: Encodable, Response: Decodable>(
+        url: URL,
+        method: String,
+        body: Body?
+    ) async throws -> Response {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 12
@@ -216,6 +239,8 @@ struct WatchProgressRequest: Encodable {
     let deviceId: UUID?
     let positionSeconds: Int
     let completed: Bool
+    let audioIndex: Int?
+    let subtitleIndex: Int?
 }
 
 struct DeviceRegistration: Decodable {
@@ -245,6 +270,9 @@ struct ManifestVideo: Identifiable, Codable {
     let downloadPriority: DownloadPriority
     let expiresAt: Date?
     let assets: [ManifestAsset]
+    /// Optional timeline metadata. Older servers omit both fields.
+    var chapters: [VideoChapter]? = nil
+    var previewImages: [VideoPreviewImage]? = nil
 
     init(
         id: UUID,
@@ -275,6 +303,35 @@ struct ManifestVideo: Identifiable, Codable {
     var thumbnailURL: URL? {
         assets.first(where: { $0.kind == .thumbnail })?.url
     }
+
+    func previewImageURL(at seconds: Double) -> URL? {
+        previewImages?
+            .filter { Double($0.startSeconds) <= seconds }
+            .max(by: { $0.startSeconds < $1.startSeconds })?
+            .url
+            ?? chapters?
+                .filter { Double($0.startSeconds) <= seconds }
+                .max(by: { $0.startSeconds < $1.startSeconds })?
+                .thumbnailURL
+    }
+}
+
+struct VideoChapter: Identifiable, Codable {
+    let title: String
+    let startSeconds: Int
+    var thumbnailUrl: URL? = nil
+
+    var id: Int { startSeconds }
+    var thumbnailURL: URL? { thumbnailUrl }
+}
+
+/// A server-generated frame or sprite tile already cropped to one preview image.
+/// This deliberately does not require a particular BIF or sprite-sheet format.
+struct VideoPreviewImage: Identifiable, Codable {
+    let startSeconds: Int
+    let url: URL
+
+    var id: Int { startSeconds }
 }
 
 struct ManifestAsset: Identifiable, Codable {
@@ -305,6 +362,8 @@ enum AssetKind: String, Codable {
 struct PlaybackURLResponse: Decodable {
     let url: URL
     let expiresInSeconds: Int
+    let audioTracks: [MediaTrack]?
+    let subtitleTracks: [MediaTrack]?
 }
 
 struct APIErrorResponse: Decodable {

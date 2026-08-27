@@ -57,12 +57,15 @@ struct ContentView: View {
                 onSelectVideo: { video in
                     await model.preparePlaybackItem(for: video)
                 },
+                onSelectTracks: { video, audioIndex, subtitleIndex in
+                    await model.preparePlaybackItem(for: video, audioIndex: audioIndex, subtitleIndex: subtitleIndex)
+                },
                 onRefreshVideos: {
                     await model.refreshLibrarySilently()
                     return model.videos
                 },
-                onProgress: { videoId, position, completed, force in
-                    model.reportPlaybackProgress(videoId: videoId, position: position, completed: completed, force: force)
+                onProgress: { videoId, position, completed, force, audioIndex, subtitleIndex in
+                    model.reportPlaybackProgress(videoId: videoId, position: position, completed: completed, force: force, audioIndex: audioIndex, subtitleIndex: subtitleIndex)
                 }
             ) {
                 model.closePlayer()
