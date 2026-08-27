@@ -47,8 +47,24 @@ struct APIClient {
         try await request("/devices/\(deviceId.uuidString)/sync", method: "POST")
     }
 
-    func playbackURL(videoId: UUID) async throws -> PlaybackURLResponse {
-        try await request("/videos/\(videoId.uuidString)/playback-url")
+    func playbackURL(
+        videoId: UUID,
+        profile: PlaybackDeviceProfile
+    ) async throws -> PlaybackURLResponse {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let profileData = try encoder.encode(profile)
+        guard let encodedProfile = String(data: profileData, encoding: .utf8) else {
+            throw APIError.invalidResponse
+        }
+
+        // Keep the existing GET endpoint (and compatibility with today's API)
+        // while attaching the profile for servers that can choose direct play,
+        // remux, or transcode. URLComponents performs the required escaping.
+        return try await request(
+            "/videos/\(videoId.uuidString)/playback-url",
+            queryItems: [URLQueryItem(name: "device_profile", value: encodedProfile)]
+        )
     }
 
     func reportWatchProgress(
@@ -73,18 +89,27 @@ struct APIClient {
 
     private func request<Response: Decodable>(
         _ path: String,
-        method: String = "GET"
+        method: String = "GET",
+        queryItems: [URLQueryItem] = []
     ) async throws -> Response {
         let emptyBody: EmptyBody? = nil
-        return try await request(path, method: method, body: emptyBody)
+        return try await request(path, method: method, queryItems: queryItems, body: emptyBody)
     }
 
     private func request<Body: Encodable, Response: Decodable>(
         _ path: String,
         method: String = "GET",
+        queryItems: [URLQueryItem] = [],
         body: Body?
     ) async throws -> Response {
-        let url = environment.baseURL.appending(path: path)
+        let baseURL = environment.baseURL.appending(path: path)
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw APIError.invalidResponse
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            throw APIError.invalidResponse
+        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 12

@@ -160,6 +160,10 @@ final class AppModel {
         APIClient(environment: APIEnvironment(baseURL: apiBaseURL), session: session)
     }
 
+    private var playbackProfile: PlaybackDeviceProfile {
+        PlaybackDeviceProfileBuilder.currentAVPlayer()
+    }
+
     var filteredVideos: [ManifestVideo] {
         videos.filter { $0.matches(searchText: searchText) }
     }
@@ -321,7 +325,7 @@ final class AppModel {
                 playbackErrorMessage = Self.offlinePlaybackMessage
                 return
             } else {
-                url = try await api.playbackURL(videoId: video.id).url
+                url = try await api.playbackURL(videoId: video.id, profile: playbackProfile).url
             }
             let resumeAt = history.entry(for: video.id)?.resumePosition ?? 0
             history.recordPlayback(of: video, serverBaseURL: apiBaseURL)
@@ -353,7 +357,7 @@ final class AppModel {
                 playbackErrorMessage = Self.offlinePlaybackMessage
                 return
             } else {
-                url = try await api.playbackURL(videoId: historyEntry.id).url
+                url = try await api.playbackURL(videoId: historyEntry.id, profile: playbackProfile).url
             }
             let video = ManifestVideo(
                 id: historyEntry.id,
@@ -385,7 +389,7 @@ final class AppModel {
                 playbackErrorMessage = Self.offlinePlaybackMessage
                 return nil
             } else {
-                url = try await api.playbackURL(videoId: video.id).url
+                url = try await api.playbackURL(videoId: video.id, profile: playbackProfile).url
             }
             history.recordPlayback(of: video, serverBaseURL: apiBaseURL)
             return PlaybackItem(video: video, url: url)
