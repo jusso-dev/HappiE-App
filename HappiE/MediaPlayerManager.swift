@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import Combine
 import SwiftUI
 import UIKit
@@ -37,7 +38,7 @@ protocol MediaPlayerSession: AnyObject {
 /// One observable playback session. Engine-specific callbacks are normalized
 /// here so kid-facing playback policy remains independent of AVPlayer/VLC.
 @MainActor
-final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession {
+final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, AVPictureInPictureControllerDelegate {
     let player = AVPlayer()
     @Published private(set) var isPlaying = false
     @Published private(set) var currentTime: Double = 0
@@ -46,11 +47,13 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession {
     @Published private(set) var endedEvent = UUID()
     @Published private(set) var stalledEvent = UUID()
     @Published private(set) var engine: PlaybackEngine
+    @Published private(set) var isPictureInPictureActive = false
 
     private var currentURL: URL
     private var timeObserver: Any?
     private var volumeObservation: NSKeyValueObservation?
     private var notifications: [NSObjectProtocol] = []
+    private var pictureInPictureController: AVPictureInPictureController?
 
 #if canImport(MobileVLCKit)
     fileprivate let vlcPlayer = VLCMediaPlayer()
@@ -86,6 +89,42 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession {
     var currentTimeText: String { Self.timeText(currentTime) }
     var durationText: String { Self.timeText(duration) }
     var usesCompatibilityPlayer: Bool { engine == .compatibility }
+    var isPictureInPictureSupported: Bool {
+        !usesCompatibilityPlayer && AVPictureInPictureController.isPictureInPictureSupported()
+    }
+
+    func configurePictureInPicture(with playerLayer: AVPlayerLayer) {
+        guard pictureInPictureController == nil, isPictureInPictureSupported else { return }
+        let controller = AVPictureInPictureController(playerLayer: playerLayer)
+        controller.delegate = self
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        pictureInPictureController = controller
+    }
+
+    func togglePictureInPicture() {
+        guard let pictureInPictureController else { return }
+        if pictureInPictureController.isPictureInPictureActive {
+            pictureInPictureController.stopPictureInPicture()
+        } else if pictureInPictureController.isPictureInPicturePossible {
+            pictureInPictureController.startPictureInPicture()
+        }
+    }
+
+    nonisolated func pictureInPictureControllerDidStartPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor [weak self] in
+            self?.isPictureInPictureActive = true
+        }
+    }
+
+    nonisolated func pictureInPictureControllerDidStopPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor [weak self] in
+            self?.isPictureInPictureActive = false
+        }
+    }
 
     func setEngine(_ requested: PlaybackEngine) {
 #if canImport(MobileVLCKit)
@@ -110,8 +149,15 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession {
         } else {
             player.isMuted = false
             player.volume = 1
-            player.play()
+            // play() resets AVPlayer to 1x. Apply the grown-up's stored
+            // preference explicitly so resumes, seeks, and item changes keep it.
+            player.playImmediately(atRate: Self.storedPlaybackRate)
         }
+    }
+
+    private static var storedPlaybackRate: Float {
+        let value = UserDefaults.standard.object(forKey: "HappiEPlaybackRate") as? Double ?? 1
+        return Float([0.75, 1, 1.25, 1.5].contains(value) ? value : 1)
     }
 
     func pause() {

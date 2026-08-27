@@ -173,10 +173,10 @@ struct VideoPlayerScreen: View {
         if controller.usesCompatibilityPlayer {
             VLCVideoSurface(manager: controller).ignoresSafeArea()
         } else {
-            VideoPlayer(player: controller.player).ignoresSafeArea()
+            NativeVideoPlayer(controller: controller).ignoresSafeArea()
         }
 #else
-        VideoPlayer(player: controller.player).ignoresSafeArea()
+        NativeVideoPlayer(controller: controller).ignoresSafeArea()
 #endif
     }
 
@@ -583,6 +583,24 @@ private struct PlayerTopBar: View {
             AirPlayRouteButton()
                 .frame(width: 56, height: 56)
 
+            if controller.isPictureInPictureSupported {
+                Button {
+                    controller.togglePictureInPicture()
+                } label: {
+                    Image(systemName: controller.isPictureInPictureActive ? "pip.exit" : "pip.enter")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 56, height: 56)
+                        .background(.black.opacity(0.45))
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel(
+                    controller.isPictureInPictureActive
+                        ? "Stop Picture in Picture"
+                        : "Start Picture in Picture"
+                )
+            }
+
             PlayerVolumeControl(controller: controller)
                 .frame(width: 240)
         }
@@ -672,6 +690,37 @@ private struct SuggestedVideoStrip: View {
     }
 }
 
+/// AVKit's player-layer PiP API keeps HappiE's custom kid controls while
+/// enabling both the top-bar PiP action and automatic PiP on app background.
+private struct NativeVideoPlayer: UIViewRepresentable {
+    @ObservedObject var controller: MediaPlayerManager
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.playerLayer.player = controller.player
+        view.playerLayer.videoGravity = .resizeAspect
+        controller.player.allowsExternalPlayback = true
+        controller.player.usesExternalPlaybackWhileExternalScreenIsActive = true
+        controller.configurePictureInPicture(with: view.playerLayer)
+        return view
+    }
+
+    func updateUIView(_ view: PlayerLayerView, context: Context) {
+        if view.playerLayer.player !== controller.player {
+            view.playerLayer.player = controller.player
+        }
+        controller.player.allowsExternalPlayback = true
+        controller.player.usesExternalPlaybackWhileExternalScreenIsActive = true
+    }
+}
+
+private final class PlayerLayerView: UIView {
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+}
 
 private struct KidPlaybackControls: View {
     let video: ManifestVideo

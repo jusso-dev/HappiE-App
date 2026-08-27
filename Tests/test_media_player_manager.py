@@ -22,7 +22,7 @@ class MediaPlayerManagerRegressionTests(unittest.TestCase):
 
     def test_playback_request_has_device_profile_hint(self):
         source = (ROOT / "HappiE" / "HappiEAPI.swift").read_text()
-        self.assertIn('URLQueryItem(name: "device_profile", value: profile.rawValue)', source)
+        self.assertIn('URLQueryItem(name: "device_profile", value: encodedProfile)', source)
 
 
 if __name__ == "__main__":
