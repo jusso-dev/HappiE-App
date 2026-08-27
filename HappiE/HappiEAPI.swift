@@ -245,6 +245,9 @@ struct ManifestVideo: Identifiable, Codable {
     let downloadPriority: DownloadPriority
     let expiresAt: Date?
     let assets: [ManifestAsset]
+    /// Optional timeline metadata. Older servers omit both fields.
+    var chapters: [VideoChapter]? = nil
+    var previewImages: [VideoPreviewImage]? = nil
 
     init(
         id: UUID,
@@ -275,6 +278,35 @@ struct ManifestVideo: Identifiable, Codable {
     var thumbnailURL: URL? {
         assets.first(where: { $0.kind == .thumbnail })?.url
     }
+
+    func previewImageURL(at seconds: Double) -> URL? {
+        previewImages?
+            .filter { Double($0.startSeconds) <= seconds }
+            .max(by: { $0.startSeconds < $1.startSeconds })?
+            .url
+            ?? chapters?
+                .filter { Double($0.startSeconds) <= seconds }
+                .max(by: { $0.startSeconds < $1.startSeconds })?
+                .thumbnailURL
+    }
+}
+
+struct VideoChapter: Identifiable, Codable {
+    let title: String
+    let startSeconds: Int
+    var thumbnailUrl: URL? = nil
+
+    var id: Int { startSeconds }
+    var thumbnailURL: URL? { thumbnailUrl }
+}
+
+/// A server-generated frame or sprite tile already cropped to one preview image.
+/// This deliberately does not require a particular BIF or sprite-sheet format.
+struct VideoPreviewImage: Identifiable, Codable {
+    let startSeconds: Int
+    let url: URL
+
+    var id: Int { startSeconds }
 }
 
 struct ManifestAsset: Identifiable, Codable {

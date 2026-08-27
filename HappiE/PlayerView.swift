@@ -528,6 +528,7 @@ private struct PlayerChrome: View {
 
                 VStack(spacing: 20) {
                     KidPlaybackControls(
+                        video: item.video,
                         controller: controller,
                         hasNextVideo: !videos.isEmpty,
                         loopEnabled: $loopEnabled,
@@ -784,6 +785,7 @@ final class PlayerController: ObservableObject {
 }
 
 private struct KidPlaybackControls: View {
+    let video: ManifestVideo
     @ObservedObject var controller: PlayerController
     let hasNextVideo: Bool
     @Binding var loopEnabled: Bool
@@ -817,6 +819,7 @@ private struct KidPlaybackControls: View {
 
             VStack(spacing: 8) {
                 BigTimeline(
+                    video: video,
                     currentTime: controller.currentTime,
                     duration: controller.duration,
                     onSeek: { seconds in
@@ -832,6 +835,13 @@ private struct KidPlaybackControls: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(.white)
                 .monospacedDigit()
+
+                if let chapters = video.chapters, !chapters.isEmpty {
+                    ChapterStrip(chapters: chapters) { chapter in
+                        controller.seek(to: Double(chapter.startSeconds))
+                        controller.play()
+                    }
+                }
             }
             .frame(maxWidth: .infinity)
 
@@ -852,14 +862,17 @@ private struct KidPlaybackControls: View {
 }
 
 private struct BigTimeline: View {
+    let video: ManifestVideo
     let currentTime: Double
     let duration: Double
     let onSeek: (Double) -> Void
+    @State private var dragTime: Double?
 
     var body: some View {
         GeometryReader { proxy in
             let width = max(proxy.size.width, 1)
-            let progress = duration > 0 ? min(max(currentTime / duration, 0), 1) : 0
+            let displayedTime = dragTime ?? currentTime
+            let progress = duration > 0 ? min(max(displayedTime / duration, 0), 1) : 0
             let knobX = progress * width
 
             ZStack(alignment: .leading) {
@@ -877,6 +890,16 @@ private struct BigTimeline: View {
                     .overlay(Circle().stroke(.white, lineWidth: 6))
                     .shadow(color: .black.opacity(0.26), radius: 6, x: 0, y: 2)
                     .offset(x: min(max(knobX - 19, 0), max(width - 38, 0)))
+
+                if let dragTime {
+                    ScrubPreview(video: video, seconds: dragTime)
+                        .frame(width: 176)
+                        .offset(
+                            x: min(max(knobX - 88, 0), max(width - 176, 0)),
+                            y: -112
+                        )
+                        .allowsHitTesting(false)
+                }
             }
             .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -884,7 +907,13 @@ private struct BigTimeline: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let percent = min(max(value.location.x / width, 0), 1)
-                        onSeek(percent * duration)
+                        dragTime = percent * duration
+                    }
+                    .onEnded { value in
+                        let percent = min(max(value.location.x / width, 0), 1)
+                        let seconds = percent * duration
+                        dragTime = nil
+                        onSeek(seconds)
                     }
             )
         }
@@ -902,6 +931,74 @@ private struct BigTimeline: View {
                 break
             }
         }
+    }
+}
+
+private struct ScrubPreview: View {
+    let video: ManifestVideo
+    let seconds: Double
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Group {
+                if let url = video.previewImageURL(at: seconds) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            VideoThumbnail(video: video, progress: nil)
+                        }
+                    }
+                } else {
+                    VideoThumbnail(video: video, progress: nil)
+                }
+            }
+            .frame(width: 160, height: 90)
+            .clipped()
+            .clipShape(.rect(cornerRadius: 10))
+
+            Text(ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded()))))
+                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+        }
+        .padding(8)
+        .background(.black.opacity(0.88))
+        .clipShape(.rect(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ChapterStrip: View {
+    let chapters: [VideoChapter]
+    let onSelect: (VideoChapter) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(chapters.sorted(by: { $0.startSeconds < $1.startSeconds })) { chapter in
+                    Button {
+                        onSelect(chapter)
+                    } label: {
+                        Text(chapter.title)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .padding(.horizontal, 16)
+                            .frame(height: 38)
+                            .background(.white.opacity(0.16))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("Play chapter \(chapter.title)")
+                    .accessibilityValue(ManifestVideo.timestampText(seconds: chapter.startSeconds))
+                }
+            }
+        }
+#if os(tvOS)
+        .focusSection()
+#endif
     }
 }
 
