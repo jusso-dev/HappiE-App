@@ -96,6 +96,10 @@ struct APIClient {
         return try await request(path, method: method, queryItems: queryItems, body: emptyBody)
     }
 
+    private func request<Response: Decodable>(_ url: URL) async throws -> Response {
+        try await request(url: url, method: "GET", body: Optional<EmptyBody>.none)
+    }
+
     private func request<Body: Encodable, Response: Decodable>(
         _ path: String,
         method: String = "GET",
@@ -110,6 +114,14 @@ struct APIClient {
         guard let url = components.url else {
             throw APIError.invalidResponse
         }
+        return try await request(url: url, method: method, body: body)
+    }
+
+    private func request<Body: Encodable, Response: Decodable>(
+        url: URL,
+        method: String,
+        body: Body?
+    ) async throws -> Response {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 12

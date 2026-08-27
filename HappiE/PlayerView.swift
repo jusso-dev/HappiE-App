@@ -24,7 +24,8 @@ struct VideoPlayerScreen: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("HappiEAutoplayNext") private var autoplayNext = true
     @AppStorage("HappiELoopVideo") private var loopEnabled = false
-    @StateObject private var controller: PlayerController
+    @AppStorage(PlaybackEngine.defaultsKey) private var compatibilityPlayer = false
+    @StateObject private var controller: MediaPlayerManager
     @State private var currentItem: PlaybackItem
     @State private var playerVideos: [ManifestVideo]
     @State private var controlsVisible = true
@@ -55,7 +56,7 @@ struct VideoPlayerScreen: View {
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
         self.onClose = onClose
-        _controller = StateObject(wrappedValue: PlayerController(url: item.url))
+        _controller = StateObject(wrappedValue: MediaPlayerManager(url: item.url))
         _currentItem = State(initialValue: item)
         _playerVideos = State(initialValue: videos)
     }
@@ -73,8 +74,7 @@ struct VideoPlayerScreen: View {
             Color.black
                 .ignoresSafeArea()
 
-            VideoPlayer(player: controller.player)
-                .ignoresSafeArea()
+            playerSurface
 
             Button {
                 toggleControls()
@@ -152,23 +152,32 @@ struct VideoPlayerScreen: View {
             guard controller.isPlaying else { return }
             onProgress(currentItem.video.id, controller.currentTime, false, false)
         }
-        .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification)) { notification in
-            guard notification.object as AnyObject? === controller.player.currentItem else { return }
+        .onChange(of: controller.endedEvent) {
             handleVideoEnded()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemPlaybackStalled)) { notification in
-            recoverPlaybackIfNeeded(notification: notification)
+        .onChange(of: controller.stalledEvent) {
+            recoverPlayback()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime)) { notification in
-            recoverPlaybackIfNeeded(notification: notification)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemNewErrorLogEntry)) { notification in
-            recoverPlaybackIfNeeded(notification: notification)
+        .onChange(of: compatibilityPlayer) {
+            controller.setEngine(compatibilityPlayer ? .compatibility : .apple)
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .animation(.easeOut(duration: 0.18), value: controlsVisible)
         .accessibilityLabel("Playing \(currentItem.video.displayTitle)")
+    }
+
+    @ViewBuilder
+    private var playerSurface: some View {
+#if canImport(MobileVLCKit)
+        if controller.usesCompatibilityPlayer {
+            VLCVideoSurface(manager: controller).ignoresSafeArea()
+        } else {
+            VideoPlayer(player: controller.player).ignoresSafeArea()
+        }
+#else
+        VideoPlayer(player: controller.player).ignoresSafeArea()
+#endif
     }
 
     private func handleVideoEnded() {
@@ -323,19 +332,8 @@ struct VideoPlayerScreen: View {
         }
     }
 
-    private func recoverPlaybackIfNeeded(notification: Notification) {
-        guard
-            !isSwitchingVideo,
-            videoSwitchTask == nil,
-            notification.object as AnyObject? === controller.player.currentItem
-        else {
-            return
-        }
-        recoverPlayback()
-    }
-
     private func recoverPlayback() {
-        guard playbackRecoveryTask == nil, videoSwitchTask == nil else { return }
+        guard !isSwitchingVideo, playbackRecoveryTask == nil, videoSwitchTask == nil else { return }
         guard playbackRecoveryAttempts < 1 else {
             controller.pause()
             playbackFailureMessage = "This video can’t play with AVPlayer. Ask a parent to enable a compatibility player."
@@ -499,7 +497,7 @@ private struct UpNextOverlay: View {
 private struct PlayerChrome: View {
     let item: PlaybackItem
     let videos: [ManifestVideo]
-    @ObservedObject var controller: PlayerController
+    @ObservedObject var controller: MediaPlayerManager
     @Binding var loopEnabled: Bool
     @Binding var autoplayNext: Bool
     let onClose: () -> Void
@@ -549,7 +547,7 @@ private struct PlayerChrome: View {
 
 private struct PlayerTopBar: View {
     let title: String
-    @ObservedObject var controller: PlayerController
+    @ObservedObject var controller: MediaPlayerManager
     @Binding var autoplayNext: Bool
     let onClose: () -> Void
 
@@ -674,119 +672,10 @@ private struct SuggestedVideoStrip: View {
     }
 }
 
-@MainActor
-final class PlayerController: ObservableObject {
-    let player: AVPlayer
-
-    @Published var isPlaying = false
-    @Published var currentTime: Double = 0
-    @Published var duration: Double = 1
-    @Published var volume: Double = 1
-
-    private var timeObserver: Any?
-    private var volumeObservation: NSKeyValueObservation?
-
-    init(url: URL) {
-        player = AVPlayer(url: url)
-        player.volume = 1
-        player.isMuted = false
-        observeSystemVolume()
-        addTimeObserver()
-    }
-
-    deinit {
-        if let timeObserver {
-            player.removeTimeObserver(timeObserver)
-        }
-        volumeObservation?.invalidate()
-    }
-
-    var currentTimeText: String {
-        Self.timeText(currentTime)
-    }
-
-    var durationText: String {
-        Self.timeText(duration)
-    }
-
-    func play() {
-        player.isMuted = false
-        player.volume = 1
-        player.play()
-        isPlaying = true
-    }
-
-    func replaceCurrentItem(with url: URL, startAt seconds: Double = 0) {
-        currentTime = max(0, seconds)
-        duration = 1
-        isPlaying = false
-        player.pause()
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
-        if seconds > 0 {
-            player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.play()
-                }
-            }
-        } else {
-            play()
-        }
-    }
-
-    func pause() {
-        player.pause()
-        isPlaying = false
-    }
-
-    func togglePlayback() {
-        isPlaying ? pause() : play()
-    }
-
-    func jump(by seconds: Double) {
-        seek(to: currentTime + seconds)
-    }
-
-    func seek(to seconds: Double) {
-        let clamped = min(max(seconds, 0), duration)
-        currentTime = clamped
-        player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-    }
-
-    private func addTimeObserver() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
-            let seconds = time.seconds.isFinite ? time.seconds : 0
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                currentTime = seconds
-
-                if let itemDuration = player.currentItem?.duration.seconds, itemDuration.isFinite, itemDuration > 0 {
-                    duration = itemDuration
-                }
-            }
-        }
-    }
-
-    private func observeSystemVolume() {
-        let session = AVAudioSession.sharedInstance()
-        volume = Double(session.outputVolume)
-        volumeObservation = session.observe(\.outputVolume, options: [.initial, .new]) { [weak self] session, _ in
-            let systemVolume = Double(session.outputVolume)
-            Task { @MainActor [weak self] in
-                self?.volume = systemVolume
-            }
-        }
-    }
-
-    private static func timeText(_ seconds: Double) -> String {
-        ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded()))).isEmpty
-            ? "0:00"
-            : ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded())))
-    }
-}
 
 private struct KidPlaybackControls: View {
     let video: ManifestVideo
-    @ObservedObject var controller: PlayerController
+    @ObservedObject var controller: MediaPlayerManager
     let hasNextVideo: Bool
     @Binding var loopEnabled: Bool
     let onNext: () -> Void
@@ -1020,7 +909,7 @@ private struct AirPlayRouteButton: UIViewRepresentable {
 }
 
 private struct PlayerVolumeControl: View {
-    @ObservedObject var controller: PlayerController
+    @ObservedObject var controller: MediaPlayerManager
 
     var body: some View {
         HStack(spacing: 12) {
