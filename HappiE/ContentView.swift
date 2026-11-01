@@ -199,56 +199,69 @@ private struct ProfilePickerView: View {
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
     private var cardWidth: CGFloat { isCompact ? 150 : 220 }
+    private var gridSpacing: CGFloat { isCompact ? 16 : 22 }
+    private var padding: CGFloat { isCompact ? 20 : 32 }
+
+    /// As many columns as fit (one in a narrow Split View), capped by size class.
+    private func columnCount(for width: CGFloat) -> Int {
+        let fitting = Int((width - padding * 2 + gridSpacing) / (cardWidth + gridSpacing))
+        return max(1, min(model.children.count, isCompact ? 2 : 3, fitting))
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: isCompact ? 26 : 34) {
-                VStack(spacing: 8) {
-                    BrandWordmark(markSize: isCompact ? 34 : 42)
+        GeometryReader { proxy in
+            ScrollView {
+                content(columns: columnCount(for: proxy.size.width))
+                    // Centres a short list vertically; a long one starts at the top.
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
 
-                    Text("Who is watching?")
-                        .font(.system(size: isCompact ? 28 : 34, weight: .heavy, design: .rounded))
-                        .foregroundStyle(HTheme.ink)
-                }
+    private func content(columns: Int) -> some View {
+        VStack(spacing: isCompact ? 26 : 34) {
+            VStack(spacing: 8) {
+                BrandWordmark(markSize: isCompact ? 34 : 42)
 
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.fixed(cardWidth), spacing: isCompact ? 16 : 22),
-                        count: max(1, min(model.children.count, isCompact ? 2 : 3))
-                    ),
-                    spacing: isCompact ? 16 : 22
-                ) {
-                    ForEach(model.children) { child in
-                        Button {
-                            Task {
-                                await model.select(child)
-                            }
-                        } label: {
-                            VStack(spacing: isCompact ? 10 : 14) {
-                                AvatarCircle(name: child.name, size: isCompact ? 76 : 104)
+                Text("Who is watching?")
+                    .font(.system(size: isCompact ? 28 : 34, weight: .heavy, design: .rounded))
+                    .foregroundStyle(HTheme.ink)
+            }
 
-                                Text(child.name)
-                                    .font(.system(size: isCompact ? 20 : 24, weight: .heavy, design: .rounded))
-                                    .foregroundStyle(HTheme.ink)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.72)
-                            }
-                            .padding(.horizontal, 8)
-                            .frame(width: cardWidth, height: isCompact ? 150 : 200)
-                            .background(HTheme.surface)
-                            .clipShape(.rect(cornerRadius: isCompact ? 20 : 24))
+            LazyVGrid(
+                columns: Array(
+                    repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing),
+                    count: columns
+                ),
+                spacing: gridSpacing
+            ) {
+                ForEach(model.children) { child in
+                    Button {
+                        Task {
+                            await model.select(child)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Watch as \(child.name)")
+                    } label: {
+                        VStack(spacing: isCompact ? 10 : 14) {
+                            AvatarCircle(name: child.name, size: isCompact ? 76 : 104)
+
+                            Text(child.name)
+                                .font(.system(size: isCompact ? 20 : 24, weight: .heavy, design: .rounded))
+                                .foregroundStyle(HTheme.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(width: cardWidth, height: isCompact ? 150 : 200)
+                        .background(HTheme.surface)
+                        .clipShape(.rect(cornerRadius: isCompact ? 20 : 24))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Watch as \(child.name)")
                 }
             }
-            .padding(isCompact ? 20 : 32)
-            .frame(maxWidth: .infinity)
         }
-        // Centre short lists vertically; longer lists scroll.
-        .defaultScrollAnchor(.center)
-        .scrollBounceBehavior(.basedOnSize)
+        .padding(padding)
     }
 }
 

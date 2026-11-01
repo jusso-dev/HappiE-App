@@ -195,7 +195,10 @@ struct SearchBar: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(HTheme.muted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
+                .padding(.trailing, -12)
                 .accessibilityLabel("Clear search")
             }
         }
@@ -346,21 +349,25 @@ struct DownloadControl: View {
                     isConfirmingRemove = true
                 }
             } label: {
-                switch offlineState {
-                case .notDownloaded:
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(HTheme.muted)
-                case .downloading(let progress):
-                    DownloadProgressRing(progress: progress)
-                case .downloaded:
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(HTheme.accent)
+                Group {
+                    switch offlineState {
+                    case .notDownloaded:
+                        Image(systemName: "arrow.down.circle")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(HTheme.muted)
+                    case .downloading(let progress):
+                        DownloadProgressRing(progress: progress)
+                    case .downloaded:
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(HTheme.accent)
+                    }
                 }
+                // Frame and hit shape on the label, so the whole 44pt square
+                // is tappable rather than just the glyph.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
             }
-            .frame(width: 40, height: 40)
-            .contentShape(Rectangle())
             .accessibilityLabel(accessibilityText)
             .confirmationDialog(
                 "Remove this download?",
