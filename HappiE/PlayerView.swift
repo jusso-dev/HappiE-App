@@ -103,9 +103,6 @@ struct VideoPlayerScreen: View {
                     onSelect: selectVideo(_:)
                 )
                 .transition(.opacity)
-
-                CenterVideoTapTarget(onHideControls: hideControls)
-                    .zIndex(4)
             }
 
             if showsReplay {
@@ -496,22 +493,28 @@ private struct UpNextOverlay: View {
     let onCancel: () -> Void
 
     @State private var countdownProgress: CGFloat = 0
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isCompact: Bool {
+        PlayerLayout(horizontal: horizontalSizeClass, vertical: verticalSizeClass).isCompact
+    }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: isCompact ? 12 : 18) {
             Text("Up next")
                 .font(.system(size: 20, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white.opacity(0.85))
 
             VideoThumbnail(video: video, progress: nil)
-                .frame(width: 320, height: 180)
+                .frame(width: isCompact ? 224 : 320, height: isCompact ? 126 : 180)
 
             Text(video.displayTitle)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: isCompact ? 280 : 380)
 
             HStack(spacing: 14) {
                 Button(action: onCancel) {
@@ -538,9 +541,10 @@ private struct UpNextOverlay: View {
                 .buttonStyle(PrimaryButtonStyle())
             }
         }
-        .padding(30)
+        .padding(isCompact ? 20 : 30)
         .background(.black.opacity(0.78))
         .clipShape(.rect(cornerRadius: 28))
+        .padding(.horizontal, 16)
         .onAppear {
             withAnimation(.linear(duration: 5)) {
                 countdownProgress = 1
@@ -603,6 +607,26 @@ private struct TrackPickerView: View {
     }
 }
 
+/// How much room the player chrome has: iPad, iPhone portrait (narrow and
+/// tall), or iPhone landscape (short).
+enum PlayerLayout {
+    case regular
+    case compactPortrait
+    case compactLandscape
+
+    init(horizontal: UserInterfaceSizeClass?, vertical: UserInterfaceSizeClass?) {
+        if vertical == .compact {
+            self = .compactLandscape
+        } else if horizontal == .compact {
+            self = .compactPortrait
+        } else {
+            self = .regular
+        }
+    }
+
+    var isCompact: Bool { self != .regular }
+}
+
 private struct PlayerChrome: View {
     let item: PlaybackItem
     let videos: [ManifestVideo]
@@ -613,6 +637,13 @@ private struct PlayerChrome: View {
     let onOpenTracks: () -> Void
     let onNext: () -> Void
     let onSelect: (ManifestVideo) -> Void
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var layout: PlayerLayout {
+        PlayerLayout(horizontal: horizontalSizeClass, vertical: verticalSizeClass)
+    }
 
     var body: some View {
         ZStack {
@@ -627,6 +658,7 @@ private struct PlayerChrome: View {
             VStack(spacing: 0) {
                 PlayerTopBar(
                     title: item.video.displayTitle,
+                    layout: layout,
                     controller: controller,
                     autoplayNext: $autoplayNext,
                     hasTrackChoices: controller.audioTracks.count > 1 || !controller.subtitleTracks.isEmpty || item.audioTracks.count > 1 || !item.subtitleTracks.isEmpty,
@@ -636,21 +668,24 @@ private struct PlayerChrome: View {
 
                 Spacer()
 
-                VStack(spacing: 20) {
+                VStack(spacing: layout.isCompact ? 14 : 20) {
                     KidPlaybackControls(
                         video: item.video,
+                        layout: layout,
                         controller: controller,
                         hasNextVideo: !videos.isEmpty,
                         loopEnabled: $loopEnabled,
                         onNext: onNext
                     )
 
-                    if !videos.isEmpty {
-                        SuggestedVideoStrip(videos: videos, onSelect: onSelect)
+                    // A short iPhone landscape screen keeps the video visible
+                    // instead of covering it with suggestions.
+                    if !videos.isEmpty, layout != .compactLandscape {
+                        SuggestedVideoStrip(videos: videos, layout: layout, onSelect: onSelect)
                     }
                 }
-                .padding(.horizontal, 34)
-                .padding(.bottom, 28)
+                .padding(.horizontal, layout.isCompact ? 16 : 34)
+                .padding(.bottom, layout.isCompact ? 12 : 28)
             }
             .zIndex(2)
         }
@@ -659,72 +694,99 @@ private struct PlayerChrome: View {
 
 private struct PlayerTopBar: View {
     let title: String
+    let layout: PlayerLayout
     @ObservedObject var controller: MediaPlayerManager
     @Binding var autoplayNext: Bool
     let hasTrackChoices: Bool
     let onOpenTracks: () -> Void
     let onClose: () -> Void
 
+    /// Round buttons stay at or above the 44pt minimum touch target.
+    private var buttonSize: CGFloat { layout.isCompact ? 44 : 56 }
+
     var body: some View {
-        HStack(spacing: 16) {
-            Button(action: onClose) {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 24, weight: .heavy))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: layout.isCompact ? 10 : 16) {
+                closeButton
 
-                    Text("Close")
-                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                // iPhone portrait is too narrow to share a row with the
+                // buttons, so the title moves underneath.
+                if layout != .compactPortrait {
+                    titleText
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 22)
-                .frame(height: 64)
-                .background(.black.opacity(0.55))
-                .clipShape(Capsule())
-                .contentShape(Capsule())
-            }
-            .accessibilityLabel("Close the video")
 
-            Text(title)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .onLongPressGesture(minimumDuration: 0.8) {
-                    if hasTrackChoices { onOpenTracks() }
+                Spacer(minLength: 0)
+
+                AutoplayToggle(isOn: $autoplayNext, showsLabel: !layout.isCompact)
+
+                AirPlayRouteButton()
+                    .frame(width: buttonSize, height: buttonSize)
+
+                if controller.isPictureInPictureSupported {
+                    Button {
+                        controller.togglePictureInPicture()
+                    } label: {
+                        Image(systemName: controller.isPictureInPictureActive ? "pip.exit" : "pip.enter")
+                            .font(.system(size: layout.isCompact ? 20 : 24, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: buttonSize, height: buttonSize)
+                            .background(.black.opacity(0.45))
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel(
+                        controller.isPictureInPictureActive
+                            ? "Stop Picture in Picture"
+                            : "Start Picture in Picture"
+                    )
                 }
-                .accessibilityHint(hasTrackChoices ? "Long press for audio and subtitles" : "")
 
-            Spacer()
-
-            AutoplayToggle(isOn: $autoplayNext)
-
-            AirPlayRouteButton()
-                .frame(width: 56, height: 56)
-
-            if controller.isPictureInPictureSupported {
-                Button {
-                    controller.togglePictureInPicture()
-                } label: {
-                    Image(systemName: controller.isPictureInPictureActive ? "pip.exit" : "pip.enter")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 56, height: 56)
-                        .background(.black.opacity(0.45))
-                        .clipShape(Circle())
+                // iPhone has hardware volume buttons and the space is tight.
+                if !layout.isCompact {
+                    // Shrinks before the title does in iPad portrait.
+                    PlayerVolumeControl(controller: controller)
+                        .frame(minWidth: 120, maxWidth: 240)
                 }
-                .accessibilityLabel(
-                    controller.isPictureInPictureActive
-                        ? "Stop Picture in Picture"
-                        : "Start Picture in Picture"
-                )
             }
 
-            PlayerVolumeControl(controller: controller)
-                .frame(width: 240)
+            if layout == .compactPortrait {
+                titleText
+            }
         }
-        .padding(.horizontal, 30)
-        .padding(.top, 26)
-        .padding(.bottom, 20)
+        .padding(.horizontal, layout.isCompact ? 16 : 30)
+        .padding(.top, layout.isCompact ? 12 : 26)
+        .padding(.bottom, layout.isCompact ? 8 : 20)
+    }
+
+    private var closeButton: some View {
+        Button(action: onClose) {
+            HStack(spacing: layout.isCompact ? 6 : 8) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: layout.isCompact ? 18 : 24, weight: .heavy))
+
+                Text("Close")
+                    .font(.system(size: layout.isCompact ? 17 : 21, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, layout.isCompact ? 16 : 22)
+            .frame(height: layout.isCompact ? 44 : 64)
+            .background(.black.opacity(0.55))
+            .clipShape(Capsule())
+            .contentShape(Capsule())
+        }
+        .accessibilityLabel("Close the video")
+    }
+
+    private var titleText: some View {
+        Text(title)
+            .font(.system(size: layout.isCompact ? 19 : 26, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .lineLimit(layout == .compactPortrait ? 2 : 1)
+            .minimumScaleFactor(0.72)
+            .layoutPriority(1)
+            .onLongPressGesture(minimumDuration: 0.8) {
+                if hasTrackChoices { onOpenTracks() }
+            }
+            .accessibilityHint(hasTrackChoices ? "Long press for audio and subtitles" : "")
     }
 }
 
@@ -732,15 +794,18 @@ private struct PlayerTopBar: View {
 /// between "on" and "off" positions.
 private struct AutoplayToggle: View {
     @Binding var isOn: Bool
+    var showsLabel = true
 
     var body: some View {
         Button {
             isOn.toggle()
         } label: {
             HStack(spacing: 8) {
-                Text("Autoplay")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                if showsLabel {
+                    Text("Autoplay")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
 
                 ZStack(alignment: isOn ? .trailing : .leading) {
                     Capsule()
@@ -769,36 +834,22 @@ private struct AutoplayToggle: View {
     }
 }
 
-private struct CenterVideoTapTarget: View {
-    let onHideControls: () -> Void
-
-    var body: some View {
-        Button {
-            onHideControls()
-        } label: {
-            Rectangle()
-                .fill(.black.opacity(0.001))
-                .frame(width: 560, height: 300)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Hide video controls")
-    }
-}
-
 private struct SuggestedVideoStrip: View {
     let videos: [ManifestVideo]
+    let layout: PlayerLayout
     let onSelect: (ManifestVideo) -> Void
+
+    private var thumbnailWidth: CGFloat { layout.isCompact ? 168 : 300 }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 16) {
+            HStack(spacing: layout.isCompact ? 12 : 16) {
                 ForEach(videos.prefix(8)) { video in
                     Button {
                         onSelect(video)
                     } label: {
                         VideoThumbnail(video: video, progress: nil)
-                            .frame(width: 300, height: 168)
+                            .frame(width: thumbnailWidth, height: thumbnailWidth * 9 / 16)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Play \(video.displayTitle)")
@@ -842,76 +893,105 @@ private final class PlayerLayerView: UIView {
 
 private struct KidPlaybackControls: View {
     let video: ManifestVideo
+    let layout: PlayerLayout
     @ObservedObject var controller: MediaPlayerManager
     let hasNextVideo: Bool
     @Binding var loopEnabled: Bool
     let onNext: () -> Void
 
     var body: some View {
-        HStack(spacing: 18) {
-            Button {
-                controller.togglePlayback()
-            } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 52, weight: .black))
-                    .foregroundStyle(.white)
-                    .frame(width: 78, height: 78)
-            }
-            .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
+        if layout == .compactPortrait {
+            // Narrow screen: full-width timeline with the buttons centred
+            // underneath, so the timeline isn't squeezed between them.
+            VStack(spacing: 14) {
+                timeline
 
-            Button {
-                loopEnabled.toggle()
-            } label: {
-                Image(systemName: "repeat")
-                    .font(.system(size: 26, weight: .black))
-                    .foregroundStyle(loopEnabled ? .black : .white)
-                    .frame(width: 58, height: 58)
-                    .background(loopEnabled ? .white : .white.opacity(0.14))
-                    .clipShape(Circle())
-            }
-            .accessibilityLabel("Repeat this video")
-            .accessibilityValue(loopEnabled ? "On" : "Off")
-            .accessibilityAddTraits(loopEnabled ? .isSelected : [])
-
-            VStack(spacing: 8) {
-                BigTimeline(
-                    video: video,
-                    currentTime: controller.currentTime,
-                    duration: controller.duration,
-                    onSeek: { seconds in
-                        controller.seek(to: seconds)
-                    }
-                )
-
-                HStack(spacing: 20) {
-                    Text(controller.currentTimeText)
-                    Spacer()
-                    Text(controller.durationText)
-                }
-                .font(.system(size: 22, weight: .bold))
-                .foregroundStyle(.white)
-                .monospacedDigit()
-
-                if let chapters = video.chapters, !chapters.isEmpty {
-                    ChapterStrip(chapters: chapters) { chapter in
-                        controller.seek(to: Double(chapter.startSeconds))
-                        controller.play()
-                    }
+                HStack(spacing: 36) {
+                    loopButton
+                    playPauseButton
+                    nextButton
                 }
             }
             .frame(maxWidth: .infinity)
-
-            Button {
-                onNext()
-            } label: {
-                Image(systemName: "forward.end.fill")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 74, height: 74)
+        } else {
+            HStack(spacing: layout.isCompact ? 12 : 18) {
+                playPauseButton
+                loopButton
+                timeline
+                nextButton
             }
-            .disabled(!hasNextVideo)
-            .opacity(hasNextVideo ? 1 : 0.38)
-            .accessibilityLabel("Play next video")
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var playPauseButton: some View {
+        Button {
+            controller.togglePlayback()
+        } label: {
+            Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: layout.isCompact ? 40 : 52, weight: .black))
+                .foregroundStyle(.white)
+                .frame(width: layout.isCompact ? 64 : 78, height: layout.isCompact ? 64 : 78)
+        }
+        .accessibilityLabel(controller.isPlaying ? "Pause" : "Play")
+    }
+
+    private var loopButton: some View {
+        Button {
+            loopEnabled.toggle()
+        } label: {
+            Image(systemName: "repeat")
+                .font(.system(size: layout.isCompact ? 22 : 26, weight: .black))
+                .foregroundStyle(loopEnabled ? .black : .white)
+                .frame(width: layout.isCompact ? 50 : 58, height: layout.isCompact ? 50 : 58)
+                .background(loopEnabled ? .white : .white.opacity(0.14))
+                .clipShape(Circle())
+        }
+        .accessibilityLabel("Repeat this video")
+        .accessibilityValue(loopEnabled ? "On" : "Off")
+        .accessibilityAddTraits(loopEnabled ? .isSelected : [])
+    }
+
+    private var nextButton: some View {
+        Button {
+            onNext()
+        } label: {
+            Image(systemName: "forward.end.fill")
+                .font(.system(size: layout.isCompact ? 28 : 36, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: layout.isCompact ? 56 : 74, height: layout.isCompact ? 56 : 74)
+        }
+        .disabled(!hasNextVideo)
+        .opacity(hasNextVideo ? 1 : 0.38)
+        .accessibilityLabel("Play next video")
+    }
+
+    private var timeline: some View {
+        VStack(spacing: layout.isCompact ? 4 : 8) {
+            BigTimeline(
+                video: video,
+                currentTime: controller.currentTime,
+                duration: controller.duration,
+                onSeek: { seconds in
+                    controller.seek(to: seconds)
+                }
+            )
+
+            HStack(spacing: 20) {
+                Text(controller.currentTimeText)
+                Spacer()
+                Text(controller.durationText)
+            }
+            .font(.system(size: layout.isCompact ? 15 : 22, weight: .bold))
+            .foregroundStyle(.white)
+            .monospacedDigit()
+
+            if let chapters = video.chapters, !chapters.isEmpty {
+                ChapterStrip(chapters: chapters) { chapter in
+                    controller.seek(to: Double(chapter.startSeconds))
+                    controller.play()
+                }
+            }
         }
         .frame(maxWidth: .infinity)
     }
