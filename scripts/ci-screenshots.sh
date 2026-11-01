@@ -13,27 +13,34 @@ SETTLE="${SETTLE:-7}"
 mkdir -p "$OUT_DIR"
 
 pick_device() {
-  # Newest available simulator whose name starts with $1.
+  # Simulator on the newest iOS runtime: the first preferred name that
+  # exists, otherwise any device whose name starts with the first word.
   xcrun simctl list devices available -j | python3 -c '
-import json, sys
-prefix = sys.argv[1]
-runtimes = json.load(sys.stdin)["devices"]
-found = [
-    (runtime, d["udid"], d["name"])
-    for runtime, devices in runtimes.items() if "iOS" in runtime
-    for d in devices if d["name"].startswith(prefix)
-]
-found.sort()
-print(found[-1][1] if found else "")
-' "$1"
+import json, re, sys
+preferred = sys.argv[1:]
+prefix = preferred[0].split()[0]
+def version(runtime):
+    return [int(n) for n in re.findall(r"\d+", runtime.rsplit(".", 1)[-1])]
+runtimes = sorted(
+    ((r, d) for r, d in json.load(sys.stdin)["devices"].items() if ".iOS-" in r),
+    key=lambda item: version(item[0]),
+)
+if not runtimes:
+    sys.exit()
+devices = runtimes[-1][1]
+by_name = {d["name"]: d["udid"] for d in devices}
+match = next((by_name[n] for n in preferred if n in by_name), None)
+match = match or next((d["udid"] for d in devices if d["name"].startswith(prefix)), "")
+print(match)
+' "$@"
 }
 
-IPHONE="${IPHONE_UDID:-$(pick_device "iPhone")}"
-IPAD="${IPAD_UDID:-$(pick_device "iPad")}"
+IPHONE="${IPHONE_UDID:-$(pick_device "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro" "iPhone 16")}"
+IPAD="${IPAD_UDID:-$(pick_device "iPad Air 11-inch (M4)" "iPad Air 11-inch (M3)" "iPad (A16)")}"
 [[ -n "$IPHONE" && -n "$IPAD" ]] || { echo "No iPhone/iPad simulator available" >&2; exit 1; }
 
 xcodebuild -project "$ROOT/HappiE.xcodeproj" -scheme HappiE \
-  -destination "id=$IPHONE" -derivedDataPath "$DERIVED" \
+  -destination "generic/platform=iOS Simulator" -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO build -quiet
 APP="$DERIVED/Build/Products/Debug-iphonesimulator/HappiE.app"
 
@@ -57,7 +64,7 @@ launch() {
   shift 2
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   xcrun simctl uninstall "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
-  xcrun simctl install "$udid" "$APP"
+  xcrun simctl install "$udid" "$APP" || return 1
   xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null
   sleep "$SETTLE"
   xcrun simctl io "$udid" screenshot "$OUT_DIR/$name.png" >/dev/null
@@ -71,7 +78,10 @@ for device in iphone ipad; do
   xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 \
     --wifiBars 3 >/dev/null 2>&1 || true
 
-  launch "$udid" "$device-01-profiles" -HappiESelectedChildId none
+  if ! launch "$udid" "$device-01-profiles" -HappiESelectedChildId none; then
+    echo "::warning::HappiE does not install on the $device simulator; skipping its screens"
+    continue
+  fi
   launch "$udid" "$device-02-home" -HappiESelectedChildId "$CHILD_ID"
   launch "$udid" "$device-03-parent-gate" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
   launch "$udid" "$device-04-error" -HappiEAPIBaseURL "http://localhost:9"
