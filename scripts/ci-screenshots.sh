@@ -66,9 +66,10 @@ launch() {
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   xcrun simctl uninstall "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   xcrun simctl install "$udid" "$APP" || return 1
-  xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null
+  # Explicit returns: errexit is off inside `if ! launch ...`.
+  xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null || return 1
   sleep "$SETTLE"
-  xcrun simctl io "$udid" screenshot "$OUT_DIR/$name.png" >/dev/null
+  xcrun simctl io "$udid" screenshot "$OUT_DIR/$name.png" >/dev/null || return 1
   echo "captured $name"
 }
 
