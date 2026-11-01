@@ -61,6 +61,15 @@ class StateRaceRegressionTests(unittest.TestCase):
 
         self.assertFalse(info["UIApplicationSceneManifest"]["UIApplicationSupportsMultipleScenes"])
 
+    def test_background_keeps_a_player_that_is_in_picture_in_picture(self):
+        model = source("AppModel.swift")
+        recover = model.split("func recoverForChildUse()", 1)[1].split("}", 1)[0]
+        close = model.split("func closePlayer()", 1)[1].split("}", 1)[0]
+
+        self.assertIn("guard !playerContinuesInBackground", recover)
+        self.assertIn("playerContinuesInBackground = false", close)
+        self.assertIn("onBackgroundPlaybackChange", source("ContentView.swift"))
+
 
 if __name__ == "__main__":
     unittest.main()

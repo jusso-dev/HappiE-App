@@ -20,6 +20,8 @@ struct VideoPlayerScreen: View {
     let onRefreshVideos: () async -> [ManifestVideo]
     /// (videoId, positionSeconds, completed, force, audioIndex, subtitleIndex)
     let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
+    /// Reports whether playback should survive the app going to the background.
+    let onBackgroundPlaybackChange: (Bool) -> Void
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -53,6 +55,7 @@ struct VideoPlayerScreen: View {
         onSelectTracks: @escaping (ManifestVideo, Int?, Int) async -> PlaybackItem?,
         onRefreshVideos: @escaping () async -> [ManifestVideo],
         onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
+        onBackgroundPlaybackChange: @escaping (Bool) -> Void = { _ in },
         onClose: @escaping () -> Void
     ) {
         self.item = item
@@ -61,6 +64,7 @@ struct VideoPlayerScreen: View {
         self.onSelectTracks = onSelectTracks
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
+        self.onBackgroundPlaybackChange = onBackgroundPlaybackChange
         self.onClose = onClose
         _controller = StateObject(wrappedValue: MediaPlayerManager(url: item.url))
         _currentItem = State(initialValue: item)
@@ -69,6 +73,13 @@ struct VideoPlayerScreen: View {
 
     private var suggestedVideos: [ManifestVideo] {
         playerVideos.filter { $0.id != currentItem.video.id }
+    }
+
+    /// Playing video starts Picture in Picture automatically on the way to
+    /// the background, so the player must stay alive for it.
+    private var continuesInBackground: Bool {
+        controller.isPictureInPictureActive
+            || (controller.isPlaying && controller.isPictureInPictureSupported)
     }
 
     private var nextVideo: ManifestVideo? {
@@ -151,9 +162,13 @@ struct VideoPlayerScreen: View {
         }
         .onDisappear {
             cancelPlayerTasks()
+            onBackgroundPlaybackChange(false)
             UIApplication.shared.isIdleTimerDisabled = false
             reportProgress(position: controller.currentTime, force: true)
             controller.pause()
+        }
+        .onChange(of: continuesInBackground, initial: true) { _, continues in
+            onBackgroundPlaybackChange(continues)
         }
         .onChange(of: controller.currentTime) {
             guard controller.isPlaying else { return }

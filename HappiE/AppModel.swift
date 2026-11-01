@@ -43,6 +43,9 @@ final class AppModel {
     var playbackItem: PlaybackItem?
     var playbackErrorMessage = ""
     var isPreparingPlayback = false
+    /// True while the open player is (or is about to be) in Picture in
+    /// Picture, so leaving the app must not tear it down.
+    var playerContinuesInBackground = false
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
@@ -426,10 +429,12 @@ final class AppModel {
     }
 
     func closePlayer() {
+        playerContinuesInBackground = false
         playbackItem = nil
     }
 
     func recoverForChildUse() {
+        guard !playerContinuesInBackground else { return }
         playbackItem = nil
     }
 
