@@ -81,7 +81,14 @@ The sync manifest exposes optimized MP4 asset metadata used for downloads:
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project HappiE.xcodeproj -scheme HappiE -destination 'generic/platform=iOS Simulator' build
+python3 -m unittest discover -s Tests -p 'test_*.py'
 ```
+
+`scripts/ci-screenshots.sh` builds the app, starts `scripts/mock_api.py` (a stand-in
+API with a sample library on `localhost:18080`), and captures the profile picker,
+home, parental gate, error, and player screens on an iPhone and an iPad simulator.
+The iOS workflow runs it on every pull request and uploads the screenshots as an
+artifact.
 
 ## Open Source Hygiene
 

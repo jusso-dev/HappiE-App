@@ -43,6 +43,17 @@ struct ContentView: View {
             }
             await model.start()
         }
+        .onChange(of: model.phase) { _, newPhase in
+            // UI-test hook: open the first video once the library is ready.
+            guard newPhase == .ready,
+                  CommandLine.arguments.contains("-uitest-play-first-video"),
+                  model.playbackItem == nil,
+                  let first = model.videos.first
+            else { return }
+            Task {
+                await model.play(first)
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 model.handleBecameActive()
