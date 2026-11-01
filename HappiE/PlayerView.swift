@@ -43,6 +43,7 @@ struct VideoPlayerScreen: View {
     @State private var playbackRecoveryAttempts = 0
     @State private var playbackFailureMessage: String?
     @State private var isShowingTrackGate = false
+    @State private var trackGatePassed = false
     @State private var isShowingTrackPicker = false
 
     init(
@@ -167,12 +168,15 @@ struct VideoPlayerScreen: View {
         .onChange(of: compatibilityPlayer) {
             controller.setEngine(compatibilityPlayer ? .compatibility : .apple)
         }
-        .sheet(isPresented: $isShowingTrackGate) {
+        .sheet(isPresented: $isShowingTrackGate, onDismiss: {
+            // Present only after the gate has fully gone, rather than racing
+            // its dismissal animation with a fixed delay.
+            guard trackGatePassed else { return }
+            trackGatePassed = false
+            isShowingTrackPicker = true
+        }) {
             ParentGateView {
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(250))
-                    isShowingTrackPicker = true
-                }
+                trackGatePassed = true
             }
         }
         .sheet(isPresented: $isShowingTrackPicker) {

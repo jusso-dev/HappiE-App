@@ -49,6 +49,9 @@ final class OfflineStore {
     private let directory: URL
     private let session: URLSession
     private var tasks: [UUID: URLSessionDownloadTask] = [:]
+    /// Identifies the live download per video, so callbacks from a cancelled
+    /// task can't overwrite the state of a download restarted after it.
+    private var downloadTokens: [UUID: UUID] = [:]
     private var progressObservations: [UUID: NSKeyValueObservation] = [:]
 
     init(session: URLSession = URLSession(configuration: .default)) {
@@ -95,6 +98,8 @@ final class OfflineStore {
         states[video.id] = .downloading(0)
         let videoId = video.id
         let destination = fileURL(for: videoId)
+        let token = UUID()
+        downloadTokens[videoId] = token
 
         let task = session.downloadTask(with: asset.url) { tempURL, response, _ in
             let succeeded: Int64? = {
@@ -114,7 +119,8 @@ final class OfflineStore {
             }()
 
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, downloadTokens[videoId] == token else { return }
+                downloadTokens[videoId] = nil
                 progressObservations[videoId] = nil
                 tasks[videoId] = nil
                 if let bytes = succeeded {
@@ -129,7 +135,7 @@ final class OfflineStore {
         progressObservations[videoId] = task.progress.observe(\.fractionCompleted) { progress, _ in
             let fraction = progress.fractionCompleted
             Task { @MainActor [weak self] in
-                guard let self, state(for: videoId).isDownloading else { return }
+                guard let self, downloadTokens[videoId] == token, state(for: videoId).isDownloading else { return }
                 states[videoId] = .downloading(fraction)
             }
         }
@@ -139,6 +145,7 @@ final class OfflineStore {
     }
 
     func cancelDownload(videoId: UUID) {
+        downloadTokens[videoId] = nil
         tasks[videoId]?.cancel()
         tasks[videoId] = nil
         progressObservations[videoId] = nil
