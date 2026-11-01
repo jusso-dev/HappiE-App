@@ -57,6 +57,7 @@ for _ in $(seq 1 50); do
   curl -sf "http://127.0.0.1:18080/children" >/dev/null && break
   sleep 0.2
 done
+curl -sf "http://127.0.0.1:18080/children" >/dev/null || { echo "Mock API did not start" >&2; exit 1; }
 
 # launch <udid> <name> [app arguments...]: fresh install, launch, capture.
 launch() {

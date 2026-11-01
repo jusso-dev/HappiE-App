@@ -160,13 +160,19 @@ class Handler(BaseHTTPRequestHandler):
         size = os.path.getsize(SAMPLE_MP4)
         start, end = 0, size - 1
         status = 200
-        if match := re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "")):
-            if match.group(1):
-                start = int(match.group(1))
-                end = int(match.group(2)) if match.group(2) else end
-            else:
-                start = size - int(match.group(2))
-            end = min(end, size - 1)
+        if header := self.headers.get("Range"):
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", header)
+            first, last = (match.group(1), match.group(2)) if match else ("", "")
+            if first:
+                start = int(first)
+                end = min(int(last), size - 1) if last else size - 1
+            elif last:
+                start = max(0, size - int(last))  # suffix range: final N bytes
+            if not (first or last) or start >= size or start > end:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                return self.end_headers()
             status = 206
         self.send_response(status)
         self.send_header("Content-Type", "video/mp4")
