@@ -39,6 +39,23 @@ class StateRaceRegressionTests(unittest.TestCase):
         self.assertEqual(download.count("downloadTokens[videoId] == token"), 2)
         self.assertIn("downloadTokens[videoId] = nil", cancel)
 
+    def test_download_completion_only_writes_the_live_file_after_the_token_check(self):
+        offline = source("OfflineStore.swift")
+        download = offline.split("func download(_ video: ManifestVideo)", 1)[1].split(
+            "private static func promote", 1
+        )[0]
+        background, main_actor = download.split("Task { @MainActor", 1)
+
+        # Off the main actor the finished file only ever goes to staging.
+        self.assertIn("moveItem(at: tempURL, to: staging)", background)
+        self.assertNotIn("destination", background.split("let succeeded", 1)[1])
+        # The live destination is written only after the token matches.
+        self.assertLess(
+            main_actor.index("downloadTokens[videoId] == token"),
+            main_actor.index("promote(staging, to: destination)"),
+        )
+        self.assertIn("removeItem(at: staging)", main_actor.split("downloadTokens[videoId] = nil", 1)[0])
+
     def test_single_window_so_stores_are_not_duplicated(self):
         info = plistlib.loads((ROOT / "HappiE" / "Info.plist").read_bytes())
 

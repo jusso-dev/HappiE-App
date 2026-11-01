@@ -100,6 +100,9 @@ final class OfflineStore {
         let destination = fileURL(for: videoId)
         let token = UUID()
         downloadTokens[videoId] = token
+        // Finished bytes land in a per-download staging file and are only
+        // promoted on the main actor if this download is still the live one.
+        let staging = directory.appending(path: "\(videoId.uuidString).\(token.uuidString).part")
 
         let task = session.downloadTask(with: asset.url) { tempURL, response, _ in
             let succeeded: Int64? = {
@@ -110,20 +113,23 @@ final class OfflineStore {
                 else {
                     return nil
                 }
-                try? FileManager.default.removeItem(at: destination)
-                guard (try? FileManager.default.moveItem(at: tempURL, to: destination)) != nil else {
+                guard (try? FileManager.default.moveItem(at: tempURL, to: staging)) != nil else {
                     return nil
                 }
-                let size = (try? FileManager.default.attributesOfItem(atPath: destination.path())[.size] as? Int64) ?? nil
+                let size = (try? FileManager.default.attributesOfItem(atPath: staging.path())[.size] as? Int64) ?? nil
                 return size ?? 0
             }()
 
             Task { @MainActor [weak self] in
-                guard let self, downloadTokens[videoId] == token else { return }
+                guard let self, downloadTokens[videoId] == token else {
+                    // Cancelled or superseded: discard, never touch the live file.
+                    try? FileManager.default.removeItem(at: staging)
+                    return
+                }
                 downloadTokens[videoId] = nil
                 progressObservations[videoId] = nil
                 tasks[videoId] = nil
-                if let bytes = succeeded {
+                if let bytes = succeeded, Self.promote(staging, to: destination) {
                     states[videoId] = .downloaded(bytes: bytes)
                     generateThumbnailFromLocalFileIfNeeded(videoId: videoId)
                 } else {
@@ -142,6 +148,16 @@ final class OfflineStore {
 
         tasks[videoId] = task
         task.resume()
+    }
+
+    /// Same-volume rename, so it is cheap enough for the main actor.
+    private static func promote(_ staging: URL, to destination: URL) -> Bool {
+        try? FileManager.default.removeItem(at: destination)
+        guard (try? FileManager.default.moveItem(at: staging, to: destination)) != nil else {
+            try? FileManager.default.removeItem(at: staging)
+            return false
+        }
+        return true
     }
 
     func cancelDownload(videoId: UUID) {
@@ -336,6 +352,10 @@ final class OfflineStore {
             at: directory,
             includingPropertiesForKeys: [.fileSizeKey]
         )) ?? []
+        // Staging files from downloads interrupted by the app quitting.
+        for file in files where file.pathExtension == "part" {
+            try? FileManager.default.removeItem(at: file)
+        }
         for file in files where file.pathExtension == "mp4" {
             guard let videoId = UUID(uuidString: file.deletingPathExtension().lastPathComponent) else { continue }
             let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
