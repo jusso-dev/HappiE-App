@@ -70,6 +70,24 @@ class StateRaceRegressionTests(unittest.TestCase):
         self.assertIn("playerContinuesInBackground = false", close)
         self.assertIn("onBackgroundPlaybackChange", source("ContentView.swift"))
 
+    def test_background_continuation_follows_the_real_pip_lifecycle(self):
+        player = source("PlayerView.swift")
+        manager = source("MediaPlayerManager.swift")
+        model = source("AppModel.swift")
+        continues = player.split("private var continuesInBackground: Bool {", 1)[1].split("}", 1)[0]
+        dismissed = model.split("func pictureInPictureDismissed()", 1)[1].split("\n    }", 1)[0]
+
+        # Automatic PiP needs it to be possible for this item, not just the device.
+        self.assertIn("isPictureInPicturePossible", continues)
+        self.assertNotIn("isPictureInPictureSupported", continues)
+        for delegate in ("WillStartPictureInPicture", "failedToStartPictureInPictureWithError",
+                         "restoreUserInterfaceForPictureInPictureStop", "DidStopPictureInPicture"):
+            self.assertIn(delegate, manager)
+        self.assertIn("observe(\\.timeControlStatus", manager)
+        # Closing PiP while backgrounded finishes the deferred recovery.
+        self.assertIn("if isInBackground", dismissed)
+        self.assertIn("playbackItem = nil", dismissed)
+
 
 if __name__ == "__main__":
     unittest.main()

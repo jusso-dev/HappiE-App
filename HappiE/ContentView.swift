@@ -83,6 +83,9 @@ struct ContentView: View {
                 },
                 onBackgroundPlaybackChange: { continues in
                     model.playerContinuesInBackground = continues
+                },
+                onPictureInPictureDismissed: {
+                    model.pictureInPictureDismissed()
                 }
             ) {
                 model.closePlayer()

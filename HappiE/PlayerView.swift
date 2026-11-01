@@ -22,6 +22,8 @@ struct VideoPlayerScreen: View {
     let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
     /// Reports whether playback should survive the app going to the background.
     let onBackgroundPlaybackChange: (Bool) -> Void
+    /// PiP ended without the full player being restored.
+    let onPictureInPictureDismissed: () -> Void
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -56,6 +58,7 @@ struct VideoPlayerScreen: View {
         onRefreshVideos: @escaping () async -> [ManifestVideo],
         onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
         onBackgroundPlaybackChange: @escaping (Bool) -> Void = { _ in },
+        onPictureInPictureDismissed: @escaping () -> Void = {},
         onClose: @escaping () -> Void
     ) {
         self.item = item
@@ -65,6 +68,7 @@ struct VideoPlayerScreen: View {
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
         self.onBackgroundPlaybackChange = onBackgroundPlaybackChange
+        self.onPictureInPictureDismissed = onPictureInPictureDismissed
         self.onClose = onClose
         _controller = StateObject(wrappedValue: MediaPlayerManager(url: item.url))
         _currentItem = State(initialValue: item)
@@ -76,10 +80,11 @@ struct VideoPlayerScreen: View {
     }
 
     /// Playing video starts Picture in Picture automatically on the way to
-    /// the background, so the player must stay alive for it.
+    /// the background (when PiP is possible for this item), so the player
+    /// must stay alive for it.
     private var continuesInBackground: Bool {
         controller.isPictureInPictureActive
-            || (controller.isPlaying && controller.isPictureInPictureSupported)
+            || (controller.isPlaying && controller.isPictureInPicturePossible)
     }
 
     private var nextVideo: ManifestVideo? {
@@ -169,6 +174,9 @@ struct VideoPlayerScreen: View {
         }
         .onChange(of: continuesInBackground, initial: true) { _, continues in
             onBackgroundPlaybackChange(continues)
+        }
+        .onChange(of: controller.pictureInPictureDismissedEvent) {
+            onPictureInPictureDismissed()
         }
         .onChange(of: controller.currentTime) {
             guard controller.isPlaying else { return }

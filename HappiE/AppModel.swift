@@ -46,6 +46,7 @@ final class AppModel {
     /// True while the open player is (or is about to be) in Picture in
     /// Picture, so leaving the app must not tear it down.
     var playerContinuesInBackground = false
+    private var isInBackground = false
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
@@ -104,6 +105,7 @@ final class AppModel {
     /// Called when the app returns to the foreground — the network may have
     /// changed (airplane mode toggled) while we were suspended.
     func handleBecameActive() {
+        isInBackground = false
         if !isNetworkAvailable {
             markOffline()
         } else if isOfflineMode {
@@ -434,8 +436,18 @@ final class AppModel {
     }
 
     func recoverForChildUse() {
+        isInBackground = true
         guard !playerContinuesInBackground else { return }
         playbackItem = nil
+    }
+
+    /// PiP was closed (or failed) rather than restored. If that happened
+    /// while the app is in the background, finish the deferred recovery.
+    func pictureInPictureDismissed() {
+        playerContinuesInBackground = false
+        if isInBackground {
+            playbackItem = nil
+        }
     }
 
     /// Saves progress locally and mirrors it to the server, throttled so the
