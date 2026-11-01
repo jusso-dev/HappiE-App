@@ -13,6 +13,9 @@ struct HistoryView: View {
     @Bindable var model: AppModel
 
     @State private var searchText = ""
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var margin: CGFloat { horizontalSizeClass == .compact ? 16 : 24 }
 
     private var filteredEntries: [WatchHistoryEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -39,7 +42,7 @@ struct HistoryView: View {
                     HistorySearchBar(text: $searchText)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, margin)
             .padding(.top, 14)
             .padding(.bottom, 12)
             .background(HTheme.background)
@@ -70,7 +73,7 @@ struct HistoryView: View {
                             HistoryRow(model: model, entry: entry)
                         }
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, margin)
                     .padding(.vertical, 20)
                 }
                 .scrollDismissesKeyboard(.immediately)
@@ -94,15 +97,20 @@ private struct HistoryRow: View {
     @Bindable var model: AppModel
     let entry: WatchHistoryEntry
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// Smaller 16:9 thumbnail on iPhone so the title keeps room to breathe.
+    private var thumbnailWidth: CGFloat { horizontalSizeClass == .compact ? 152 : 210 }
+
     var body: some View {
         Button {
             Task {
                 await model.play(historyEntry: entry)
             }
         } label: {
-            HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .top, spacing: horizontalSizeClass == .compact ? 12 : 14) {
                 HistoryThumbnail(model: model, entry: entry)
-                    .frame(width: 210, height: 118)
+                    .frame(width: thumbnailWidth, height: thumbnailWidth * 9 / 16)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.title)
@@ -111,13 +119,12 @@ private struct HistoryRow: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
-                    HStack(spacing: 6) {
-                        if !entry.durationText.isEmpty {
-                            Text(entry.durationText)
-                            Text("•")
-                        }
-                        Text(WatchedDateText.text(for: entry.lastWatchedAt))
-                    }
+                    // One Text so it wraps instead of truncating on narrow screens.
+                    Text(
+                        [entry.durationText, WatchedDateText.text(for: entry.lastWatchedAt)]
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " • ")
+                    )
                     .font(.system(size: 15, weight: .medium, design: .rounded))
                     .foregroundStyle(HTheme.muted)
 

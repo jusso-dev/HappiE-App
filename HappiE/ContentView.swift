@@ -195,50 +195,60 @@ private struct LoadingView: View {
 
 private struct ProfilePickerView: View {
     @Bindable var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+    private var cardWidth: CGFloat { isCompact ? 150 : 220 }
 
     var body: some View {
-        VStack(spacing: 34) {
-            VStack(spacing: 8) {
-                BrandWordmark(markSize: 42)
+        ScrollView {
+            VStack(spacing: isCompact ? 26 : 34) {
+                VStack(spacing: 8) {
+                    BrandWordmark(markSize: isCompact ? 34 : 42)
 
-                Text("Who is watching?")
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
-                    .foregroundStyle(HTheme.ink)
-            }
+                    Text("Who is watching?")
+                        .font(.system(size: isCompact ? 28 : 34, weight: .heavy, design: .rounded))
+                        .foregroundStyle(HTheme.ink)
+                }
 
-            LazyVGrid(
-                columns: Array(
-                    repeating: GridItem(.fixed(220), spacing: 22),
-                    count: max(1, min(model.children.count, 3))
-                ),
-                spacing: 22
-            ) {
-                ForEach(model.children) { child in
-                    Button {
-                        Task {
-                            await model.select(child)
+                LazyVGrid(
+                    columns: Array(
+                        repeating: GridItem(.fixed(cardWidth), spacing: isCompact ? 16 : 22),
+                        count: max(1, min(model.children.count, isCompact ? 2 : 3))
+                    ),
+                    spacing: isCompact ? 16 : 22
+                ) {
+                    ForEach(model.children) { child in
+                        Button {
+                            Task {
+                                await model.select(child)
+                            }
+                        } label: {
+                            VStack(spacing: isCompact ? 10 : 14) {
+                                AvatarCircle(name: child.name, size: isCompact ? 76 : 104)
+
+                                Text(child.name)
+                                    .font(.system(size: isCompact ? 20 : 24, weight: .heavy, design: .rounded))
+                                    .foregroundStyle(HTheme.ink)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.72)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(width: cardWidth, height: isCompact ? 150 : 200)
+                            .background(HTheme.surface)
+                            .clipShape(.rect(cornerRadius: isCompact ? 20 : 24))
                         }
-                    } label: {
-                        VStack(spacing: 14) {
-                            AvatarCircle(name: child.name, size: 104)
-
-                            Text(child.name)
-                                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                                .foregroundStyle(HTheme.ink)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.72)
-                        }
-                        .frame(width: 220, height: 200)
-                        .background(HTheme.surface)
-                        .clipShape(.rect(cornerRadius: 24))
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Watch as \(child.name)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Watch as \(child.name)")
                 }
             }
+            .padding(isCompact ? 20 : 32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Centre short lists vertically; longer lists scroll.
+        .defaultScrollAnchor(.center)
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
@@ -262,26 +272,41 @@ private struct ErrorView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
 
-            HStack(spacing: 14) {
-                Button {
-                    Task {
-                        await model.loadChildren()
-                    }
-                } label: {
-                    Label("Try again", systemImage: "arrow.clockwise")
-                        .frame(width: 190, height: 60)
+            // Side by side when there's room, stacked on narrow iPhones.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    retryButton
+                    parentControlsButton
                 }
-                .buttonStyle(PrimaryButtonStyle())
 
-                Button(action: onOpenParentControls) {
-                    Label("Parent controls", systemImage: "lock.shield")
-                        .frame(width: 220, height: 60)
+                VStack(spacing: 12) {
+                    retryButton
+                    parentControlsButton
                 }
-                .buttonStyle(QuietButtonStyle())
             }
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var retryButton: some View {
+        Button {
+            Task {
+                await model.loadChildren()
+            }
+        } label: {
+            Label("Try again", systemImage: "arrow.clockwise")
+                .frame(width: 220, height: 56)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+    }
+
+    private var parentControlsButton: some View {
+        Button(action: onOpenParentControls) {
+            Label("Parent controls", systemImage: "lock.shield")
+                .frame(width: 220, height: 56)
+        }
+        .buttonStyle(QuietButtonStyle())
     }
 }
 

@@ -14,6 +14,10 @@ struct HomeView: View {
     let onOpenParentControls: () -> Void
 
     @FocusState private var searchFocused: Bool
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// 16pt margins on iPhone, roomier 24pt on iPad.
+    private var margin: CGFloat { horizontalSizeClass == .compact ? 16 : 24 }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +40,7 @@ struct HomeView: View {
                         videoGrid(title: "All videos", videos: model.videos)
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, margin)
                 .padding(.top, 18)
                 .padding(.bottom, 36)
             }
@@ -96,8 +100,9 @@ struct HomeView: View {
                     message: "Ask a grown-up to add videos from the family admin app."
                 )
             } else {
+                // One column on iPhone portrait, two in landscape, more on iPad.
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 20)],
+                    columns: [GridItem(.adaptive(minimum: 280, maximum: 420), spacing: 20)],
                     alignment: .leading,
                     spacing: 26
                 ) {
@@ -115,10 +120,14 @@ private struct HomeHeaderBar: View {
     var searchFocused: FocusState<Bool>.Binding
     let onOpenParentControls: () -> Void
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+
     var body: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 14) {
-                BrandWordmark(markSize: 36)
+            HStack(spacing: isCompact ? 10 : 14) {
+                BrandWordmark(markSize: isCompact ? 32 : 36)
 
                 Spacer()
 
@@ -129,6 +138,7 @@ private struct HomeHeaderBar: View {
                         Text(child.name)
                             .font(.system(size: 17, weight: .bold, design: .rounded))
                             .foregroundStyle(HTheme.ink)
+                            .lineLimit(1)
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Watching as \(child.name)")
@@ -147,7 +157,7 @@ private struct HomeHeaderBar: View {
 
             SearchBar(text: $model.searchText, focused: searchFocused)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, isCompact ? 16 : 24)
         .padding(.top, 10)
         .padding(.bottom, 12)
         .background(HTheme.background)
