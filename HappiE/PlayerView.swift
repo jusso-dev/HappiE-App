@@ -708,6 +708,7 @@ private struct PlayerTopBar: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: layout.isCompact ? 10 : 16) {
                 closeButton
+                    .fixedSize()
 
                 // iPhone portrait is too narrow to share a row with the
                 // buttons, so the title moves underneath.
@@ -717,7 +718,9 @@ private struct PlayerTopBar: View {
 
                 Spacer(minLength: 0)
 
+                // Controls keep their natural width; only the title truncates.
                 AutoplayToggle(isOn: $autoplayNext, showsLabel: !layout.isCompact)
+                    .fixedSize()
 
                 AirPlayRouteButton()
                     .frame(width: buttonSize, height: buttonSize)
