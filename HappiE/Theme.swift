@@ -16,6 +16,9 @@ enum HTheme {
     static let muted = Color(red: 0.38, green: 0.38, blue: 0.38)
     static let line = Color(red: 0.90, green: 0.90, blue: 0.90)
     static let accent = Color(red: 1.0, green: 0.0, blue: 0.2)
+    /// Darker red for small text: 5.8:1 on white, where `accent` is only
+    /// 4:1 (below the 4.5:1 that small text needs).
+    static let accentText = Color(red: 0.80, green: 0.0, blue: 0.16)
     static let badge = Color.black.opacity(0.75)
 
     static let thumbnailCorner: CGFloat = 12
@@ -26,6 +29,35 @@ enum HTheme {
         Color(red: 0.22, green: 0.55, blue: 0.80),
         Color(red: 0.91, green: 0.63, blue: 0.18)
     ]
+}
+
+/// A system font that keeps HappiE's designed point size at the default
+/// text size and scales with Dynamic Type, relative to `textStyle`.
+private struct ScaledFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    private let design: Font.Design
+
+    init(size: CGFloat, weight: Font.Weight, design: Font.Design, relativeTo textStyle: Font.TextStyle) {
+        _size = ScaledMetric(wrappedValue: size, relativeTo: textStyle)
+        self.weight = weight
+        self.design = design
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+
+extension View {
+    func scaledFont(
+        size: CGFloat,
+        weight: Font.Weight,
+        design: Font.Design = .rounded,
+        relativeTo textStyle: Font.TextStyle = .body
+    ) -> some View {
+        modifier(ScaledFont(size: size, weight: weight, design: design, relativeTo: textStyle))
+    }
 }
 
 struct BrandMark: View {
@@ -89,7 +121,7 @@ struct AvatarCircle: View {
 struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 18, weight: .bold, design: .rounded))
+            .scaledFont(size: 18, weight: .bold, relativeTo: .body)
             .foregroundStyle(.white)
             .background(HTheme.accent.opacity(configuration.isPressed ? 0.8 : 1))
             .clipShape(Capsule())
@@ -101,7 +133,7 @@ struct PrimaryButtonStyle: ButtonStyle {
 struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 17, weight: .semibold, design: .rounded))
+            .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
             .foregroundStyle(HTheme.ink)
             .background(configuration.isPressed ? HTheme.line : HTheme.surface)
             .clipShape(Capsule())

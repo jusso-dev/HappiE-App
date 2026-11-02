@@ -32,7 +32,7 @@ struct HistoryView: View {
             VStack(spacing: 12) {
                 HStack {
                     Text("History")
-                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .scaledFont(size: 28, weight: .heavy, relativeTo: .title)
                         .foregroundStyle(HTheme.ink)
 
                     Spacer()
@@ -114,7 +114,7 @@ private struct HistoryRow: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.title)
-                        .font(.system(size: 19, weight: .semibold, design: .rounded))
+                        .scaledFont(size: 19, weight: .semibold, relativeTo: .body)
                         .foregroundStyle(HTheme.ink)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -125,17 +125,17 @@ private struct HistoryRow: View {
                             .filter { !$0.isEmpty }
                             .joined(separator: " • ")
                     )
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .scaledFont(size: 15, weight: .medium, relativeTo: .subheadline)
                     .foregroundStyle(HTheme.muted)
 
                     if entry.completed {
                         Label("Watched to the end", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .scaledFont(size: 14, weight: .semibold, relativeTo: .footnote)
                             .foregroundStyle(HTheme.muted)
                     } else if entry.resumePosition != nil {
                         Label("Keep watching", systemImage: "play.circle.fill")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(HTheme.accent)
+                            .scaledFont(size: 14, weight: .semibold, relativeTo: .footnote)
+                            .foregroundStyle(HTheme.accentText)
                     }
                 }
 

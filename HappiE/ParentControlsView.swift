@@ -37,7 +37,7 @@ struct ParentControlsView: View {
                                 AvatarCircle(name: child.name, size: 36)
 
                                 Text(child.name)
-                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                    .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
                                     .foregroundStyle(HTheme.ink)
 
                                 Spacer()
@@ -131,8 +131,8 @@ struct ParentControlsView: View {
 
                     if !apiBaseURLError.isEmpty {
                         Label(apiBaseURLError, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(HTheme.accent)
+                            .scaledFont(size: 14, weight: .semibold, design: .default, relativeTo: .footnote)
+                            .foregroundStyle(HTheme.accentText)
                     }
 
                     Button("Use this server", systemImage: "checkmark.circle") {
@@ -157,7 +157,7 @@ struct ParentControlsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done", action: onClose)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .scaledFont(size: 17, weight: .bold, relativeTo: .body)
                 }
             }
         }

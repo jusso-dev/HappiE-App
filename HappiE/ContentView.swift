@@ -39,6 +39,9 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.light)
+        // Text scales with Dynamic Type; the largest accessibility sizes are
+        // capped so the kid-sized layouts stay usable.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .task {
             // UI-test hook: present the parental gate immediately.
             if CommandLine.arguments.contains("-uitest-parent-gate") {
@@ -144,7 +147,7 @@ private struct PlaybackErrorToast: View {
     var body: some View {
         Button(action: onDismiss) {
             Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .scaledFont(size: 15, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .padding(.horizontal, 18)
@@ -160,24 +163,32 @@ private struct PlaybackErrorToast: View {
 
 private struct WelcomeSplashView: View {
     @State private var isPlaying = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 18) {
+            // With Reduce Motion the mark fades in instead of springing up.
             BrandMark(size: 110)
-                .scaleEffect(isPlaying ? 1 : 0.6)
-                .animation(.interpolatingSpring(stiffness: 120, damping: 13).delay(0.08), value: isPlaying)
+                .scaleEffect(isPlaying || reduceMotion ? 1 : 0.6)
+                .opacity(isPlaying || !reduceMotion ? 1 : 0)
+                .animation(
+                    reduceMotion
+                        ? .easeOut(duration: 0.3)
+                        : .interpolatingSpring(stiffness: 120, damping: 13).delay(0.08),
+                    value: isPlaying
+                )
 
             Text("HappiE")
-                .font(.system(size: 54, weight: .heavy, design: .rounded))
+                .scaledFont(size: 54, weight: .heavy, relativeTo: .largeTitle)
                 .foregroundStyle(HTheme.ink)
                 .opacity(isPlaying ? 1 : 0)
                 .animation(.easeOut(duration: 0.4).delay(0.2), value: isPlaying)
 
             Text("Your family videos")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .scaledFont(size: 20, weight: .semibold, relativeTo: .title3)
                 .foregroundStyle(HTheme.muted)
                 .opacity(isPlaying ? 1 : 0)
-                .offset(y: isPlaying ? 0 : 10)
+                .offset(y: isPlaying || reduceMotion ? 0 : 10)
                 .animation(.easeOut(duration: 0.4).delay(0.34), value: isPlaying)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -199,7 +210,7 @@ private struct LoadingView: View {
                 .tint(HTheme.accent)
 
             Text(message)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .scaledFont(size: 22, weight: .bold, relativeTo: .title2)
                 .foregroundStyle(HTheme.ink)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -238,7 +249,7 @@ private struct ProfilePickerView: View {
                 BrandWordmark(markSize: isCompact ? 34 : 42)
 
                 Text("Who is watching?")
-                    .font(.system(size: isCompact ? 28 : 34, weight: .heavy, design: .rounded))
+                    .scaledFont(size: isCompact ? 28 : 34, weight: .heavy, relativeTo: .largeTitle)
                     .foregroundStyle(HTheme.ink)
             }
 
@@ -259,13 +270,14 @@ private struct ProfilePickerView: View {
                             AvatarCircle(name: child.name, size: isCompact ? 76 : 104)
 
                             Text(child.name)
-                                .font(.system(size: isCompact ? 20 : 24, weight: .heavy, design: .rounded))
+                                .scaledFont(size: isCompact ? 20 : 24, weight: .heavy, relativeTo: .title)
                                 .foregroundStyle(HTheme.ink)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
                         .padding(.horizontal, 8)
                         .frame(width: cardWidth, height: isCompact ? 150 : 200)
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .background(HTheme.surface)
                         .clipShape(.rect(cornerRadius: isCompact ? 20 : 24))
                     }
@@ -289,11 +301,11 @@ private struct ErrorView: View {
                 .foregroundStyle(HTheme.muted)
 
             Text("Can't load videos")
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .scaledFont(size: 34, weight: .heavy, relativeTo: .largeTitle)
                 .foregroundStyle(HTheme.ink)
 
             Text(model.errorMessage)
-                .font(.system(size: 17, weight: .medium, design: .rounded))
+                .scaledFont(size: 17, weight: .medium, relativeTo: .body)
                 .foregroundStyle(HTheme.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
@@ -322,7 +334,8 @@ private struct ErrorView: View {
             }
         } label: {
             Label("Try again", systemImage: "arrow.clockwise")
-                .frame(width: 220, height: 56)
+                .padding(.horizontal, 20)
+                .frame(minWidth: 220, minHeight: 56)
         }
         .buttonStyle(PrimaryButtonStyle())
     }
@@ -330,7 +343,8 @@ private struct ErrorView: View {
     private var parentControlsButton: some View {
         Button(action: onOpenParentControls) {
             Label("Parent controls", systemImage: "lock.shield")
-                .frame(width: 220, height: 56)
+                .padding(.horizontal, 20)
+                .frame(minWidth: 220, minHeight: 56)
         }
         .buttonStyle(QuietButtonStyle())
     }

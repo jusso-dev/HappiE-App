@@ -122,6 +122,16 @@ for device in iphone ipad; do
     # Capture soon after the video loads, before the controls auto-hide (4s).
     SETTLE=1 launch "$udid" "$device-05-player" "GET /media/sample.mp4" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
   fi
+  if [[ "$device" == iphone ]]; then
+    # Dynamic Type check at a large accessibility text size.
+    if xcrun simctl ui "$udid" content_size accessibility-large >/dev/null 2>&1; then
+      launch "$udid" "$device-06-home-large-text" "GET /thumbs/" -HappiESelectedChildId "$CHILD_ID"
+      launch "$udid" "$device-07-gate-large-text" "/sync" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
+      xcrun simctl ui "$udid" content_size large >/dev/null 2>&1 || true
+    else
+      echo "::warning::simctl can't set the content size; skipping large-text screens"
+    fi
+  fi
 done
 
 ls -1 "$OUT_DIR"

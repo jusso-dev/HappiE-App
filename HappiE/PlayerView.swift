@@ -204,6 +204,8 @@ struct VideoPlayerScreen: View {
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        // The chrome is laid out around fixed control sizes over the video.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .animation(.easeOut(duration: 0.18), value: controlsVisible)
         .accessibilityLabel("Playing \(currentItem.video.displayTitle)")
     }
@@ -467,10 +469,10 @@ private struct PlaybackFailureOverlay: View {
                 .font(.system(size: 58, weight: .bold))
 
             Text("Can’t play this video")
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .scaledFont(size: 24, weight: .heavy, relativeTo: .title)
 
             Text(message)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .scaledFont(size: 17, weight: .semibold, relativeTo: .body)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
 
@@ -496,7 +498,7 @@ private struct ReplayOverlay: View {
                     .font(.system(size: 84, weight: .bold))
 
                 Text("Watch again")
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .scaledFont(size: 22, weight: .heavy, relativeTo: .title2)
             }
             .foregroundStyle(.white)
             .padding(28)
@@ -524,14 +526,14 @@ private struct UpNextOverlay: View {
     var body: some View {
         VStack(spacing: isCompact ? 12 : 18) {
             Text("Up next")
-                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .scaledFont(size: 20, weight: .heavy, relativeTo: .title3)
                 .foregroundStyle(.white.opacity(0.85))
 
             VideoThumbnail(video: video, progress: nil)
                 .frame(width: isCompact ? 224 : 320, height: isCompact ? 126 : 180)
 
             Text(video.displayTitle)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .scaledFont(size: 22, weight: .bold, relativeTo: .title2)
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
@@ -788,7 +790,7 @@ private struct PlayerTopBar: View {
                     .font(.system(size: layout.isCompact ? 18 : 24, weight: .heavy))
 
                 Text("Close")
-                    .font(.system(size: layout.isCompact ? 17 : 21, weight: .heavy, design: .rounded))
+                    .scaledFont(size: layout.isCompact ? 17 : 21, weight: .heavy, relativeTo: .title3)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, layout.isCompact ? 16 : 22)
@@ -802,7 +804,7 @@ private struct PlayerTopBar: View {
 
     private var titleText: some View {
         Text(title)
-            .font(.system(size: layout.isCompact ? 19 : 26, weight: .bold, design: .rounded))
+            .scaledFont(size: layout.isCompact ? 19 : 26, weight: .bold, relativeTo: .title)
             .foregroundStyle(.white)
             .lineLimit(layout == .compactPortrait ? 2 : 1)
             .minimumScaleFactor(0.72)
@@ -827,7 +829,7 @@ private struct AutoplayToggle: View {
             HStack(spacing: 8) {
                 if showsLabel {
                     Text("Autoplay")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .scaledFont(size: 15, weight: .bold, relativeTo: .subheadline)
                         .foregroundStyle(.white)
                 }
 
@@ -1006,7 +1008,7 @@ private struct KidPlaybackControls: View {
                 Spacer()
                 Text(controller.durationText)
             }
-            .font(.system(size: layout.isCompact ? 15 : 22, weight: .bold))
+            .scaledFont(size: layout.isCompact ? 15 : 22, weight: .bold, design: .default, relativeTo: .title2)
             .foregroundStyle(.white)
             .monospacedDigit()
 
@@ -1118,7 +1120,7 @@ private struct ScrubPreview: View {
             .clipShape(.rect(cornerRadius: 10))
 
             Text(ManifestVideo.timestampText(seconds: max(0, Int(seconds.rounded()))))
-                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                .scaledFont(size: 17, weight: .heavy, relativeTo: .body)
                 .foregroundStyle(.white)
                 .monospacedDigit()
         }
@@ -1142,7 +1144,7 @@ private struct ChapterStrip: View {
                         onSelect(chapter)
                     } label: {
                         Text(chapter.title)
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .scaledFont(size: 16, weight: .bold, relativeTo: .subheadline)
                             .lineLimit(1)
                             .padding(.horizontal, 16)
                             .frame(height: 38)
