@@ -11,6 +11,9 @@ struct ContentView: View {
     @State private var model = AppModel()
     @State private var isShowingParentGate = false
     @State private var isShowingParentControls = false
+    /// Set when the gate is passed; controls open once the gate has fully
+    /// dismissed, since presenting a sheet mid-dismissal can be dropped.
+    @State private var parentGatePassed = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -77,14 +80,24 @@ struct ContentView: View {
                 },
                 onProgress: { videoId, position, completed, force, audioIndex, subtitleIndex in
                     model.reportPlaybackProgress(videoId: videoId, position: position, completed: completed, force: force, audioIndex: audioIndex, subtitleIndex: subtitleIndex)
+                },
+                onAttachSession: { session in
+                    model.attachPlayerSession(session)
+                },
+                onDetachSession: { session in
+                    model.detachPlayerSession(session)
                 }
             ) {
                 model.closePlayer()
             }
         }
-        .sheet(isPresented: $isShowingParentGate) {
+        .sheet(isPresented: $isShowingParentGate, onDismiss: {
+            guard parentGatePassed else { return }
+            parentGatePassed = false
+            isShowingParentControls = true
+        }) {
             ParentGateView {
-                isShowingParentControls = true
+                parentGatePassed = true
             }
         }
         .sheet(isPresented: $isShowingParentControls) {

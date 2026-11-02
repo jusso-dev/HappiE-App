@@ -8,6 +8,16 @@ import UIKit
 import MobileVLCKit
 #endif
 
+/// What an open player session will do when the app leaves the foreground.
+enum BackgroundPlayback {
+    /// Nothing keeps playing; the player can close.
+    case stops
+    /// Playing, and automatic Picture in Picture can start (if enabled).
+    case mayStartPictureInPicture
+    /// Picture in Picture is starting or running.
+    case inPictureInPicture
+}
+
 enum PlaybackEngine: String {
     case apple
     case compatibility
@@ -47,7 +57,18 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     @Published private(set) var endedEvent = UUID()
     @Published private(set) var stalledEvent = UUID()
     @Published private(set) var engine: PlaybackEngine
+    /// True from the moment PiP starts launching until it stops or fails.
     @Published private(set) var isPictureInPictureActive = false
+    /// Whether PiP could start now for the current item, so automatic PiP
+    /// will kick in when the app leaves the foreground.
+    @Published private(set) var isPictureInPicturePossible = false
+    /// PiP lifecycle hooks for the app model. Called on the main actor
+    /// straight from the delegate, not via SwiftUI view updates, which can
+    /// lag while the app is in the background.
+    var onPictureInPictureStarting: (() -> Void)?
+    /// PiP ended without the full player being restored (closed from the
+    /// PiP window, or failed to start).
+    var onPictureInPictureDismissed: (() -> Void)?
     @Published private(set) var audioTracks: [MediaTrack] = []
     @Published private(set) var subtitleTracks: [MediaTrack] = []
 
@@ -56,6 +77,9 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     private var volumeObservation: NSKeyValueObservation?
     private var notifications: [NSObjectProtocol] = []
     private var pictureInPictureController: AVPictureInPictureController?
+    private var pictureInPicturePossibleObservation: NSKeyValueObservation?
+    private var timeControlObservation: NSKeyValueObservation?
+    private var isRestoringFromPictureInPicture = false
     private var audioGroup: AVMediaSelectionGroup?
     private var subtitleGroup: AVMediaSelectionGroup?
 
@@ -74,6 +98,7 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         super.init()
         player.volume = 1
         observeSystemVolume()
+        observeTimeControlStatus()
         addAVTimeObserver()
         observeAVEvents()
 #if canImport(MobileVLCKit)
@@ -87,12 +112,24 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     deinit {
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         volumeObservation?.invalidate()
+        timeControlObservation?.invalidate()
+        pictureInPicturePossibleObservation?.invalidate()
         notifications.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     var currentTimeText: String { Self.timeText(currentTime) }
     var durationText: String { Self.timeText(duration) }
     var usesCompatibilityPlayer: Bool { engine == .compatibility }
+    var backgroundPlayback: BackgroundPlayback {
+        if isPictureInPictureActive {
+            return .inPictureInPicture
+        }
+        if isPlaying && isPictureInPicturePossible {
+            return .mayStartPictureInPicture
+        }
+        return .stops
+    }
+
     var isPictureInPictureSupported: Bool {
         !usesCompatibilityPlayer && AVPictureInPictureController.isPictureInPictureSupported()
     }
@@ -105,6 +142,12 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         guard let controller = pipController else { return }
         controller.delegate = self
         controller.canStartPictureInPictureAutomaticallyFromInline = true
+        pictureInPicturePossibleObservation = controller.observe(
+            \.isPictureInPicturePossible, options: [.initial, .new]
+        ) { [weak self] controller, _ in
+            let possible = controller.isPictureInPicturePossible
+            Task { @MainActor [weak self] in self?.isPictureInPicturePossible = possible }
+        }
         pictureInPictureController = controller
     }
 
@@ -117,11 +160,46 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         }
     }
 
+    nonisolated func pictureInPictureControllerWillStartPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor [weak self] in
+            self?.pictureInPictureStarting()
+        }
+    }
+
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor [weak self] in
-            self?.isPictureInPictureActive = true
+            self?.pictureInPictureStarting()
+        }
+    }
+
+    private func pictureInPictureStarting() {
+        isPictureInPictureActive = true
+        onPictureInPictureStarting?()
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            isPictureInPictureActive = false
+            onPictureInPictureDismissed?()
+        }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        // The full player is still presented underneath, so it is restored.
+        Task { @MainActor [weak self] in
+            self?.isRestoringFromPictureInPicture = true
+            completionHandler(true)
         }
     }
 
@@ -129,7 +207,12 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor [weak self] in
-            self?.isPictureInPictureActive = false
+            guard let self else { return }
+            isPictureInPictureActive = false
+            if !isRestoringFromPictureInPicture {
+                onPictureInPictureDismissed?()
+            }
+            isRestoringFromPictureInPicture = false
         }
     }
 
@@ -314,6 +397,18 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
                     stalledEvent = UUID()
                 }
             })
+        }
+    }
+
+    /// Keeps `isPlaying` honest when something other than our own controls
+    /// pauses AVPlayer: the PiP window, Control Center, or an interruption.
+    private func observeTimeControlStatus() {
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, !usesCompatibilityPlayer, player.currentItem != nil else { return }
+                // Read the live value: queued callbacks may arrive out of date.
+                isPlaying = player.timeControlStatus != .paused
+            }
         }
     }
 
