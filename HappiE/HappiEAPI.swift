@@ -30,13 +30,13 @@ struct APIClient {
         try await request("/children")
     }
 
-    func registerDevice(childId: UUID) async throws -> DeviceRegistration {
+    func registerDevice(childId: UUID, deviceName: String) async throws -> DeviceRegistration {
         try await request(
             "/devices/register",
             method: "POST",
             body: DeviceRegisterRequest(
                 childProfileId: childId,
-                name: "Family iPad",
+                name: deviceName,
                 platform: "ios",
                 storageQuotaMb: 8192
             )

@@ -1,10 +1,10 @@
-# HappiE iPad App
+# HappiE for iPhone and iPad
 
 <p align="center">
   <img src="HappiE/Assets.xcassets/AppIcon.appiconset/HappiE-AppIcon-1024.png" alt="HappiE app icon" width="128" height="128">
 </p>
 
-HappiE is the SwiftUI iPad client for the HappiE family video library. It connects to the HappiE API on your home network (no login required), lets a child pick a profile, and plays parent-approved videos in a clean, YouTube-style interface built for little hands.
+HappiE is the SwiftUI iPhone and iPad client for the HappiE family video library. It connects to the HappiE API on your home network (no login required), lets a child pick a profile, and plays parent-approved videos in a clean, YouTube-style interface built for little hands.
 
 ## Public Release Status
 
@@ -26,15 +26,15 @@ This Xcode project has been cleaned for public release:
    ```
 
 2. Open `HappiE.xcodeproj` in Xcode.
-3. Build and run on an iPad simulator.
+3. Build and run on an iPhone or iPad simulator.
 
-For a physical iPad, set `HAPPIE_API_BASE_URL` to an API URL the device can reach, for example:
+For a physical iPhone or iPad, set `HAPPIE_API_BASE_URL` to an API URL the device can reach, for example:
 
 ```text
 http://YOUR_LAN_IP:18080
 ```
 
-The backend must also use LAN-reachable `PUBLIC_API_BASE_URL` and `R2_ENDPOINT` values so signed playback and download URLs work from the iPad.
+The backend must also use LAN-reachable `PUBLIC_API_BASE_URL` and `R2_ENDPOINT` values so signed playback and download URLs work from the device.
 
 ## Current Features
 

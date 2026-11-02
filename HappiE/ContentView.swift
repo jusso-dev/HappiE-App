@@ -208,23 +208,46 @@ private struct LoadingView: View {
 
 private struct ProfilePickerView: View {
     @Bindable var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var isCompact: Bool { horizontalSizeClass == .compact }
+    private var cardWidth: CGFloat { isCompact ? 150 : 220 }
+    private var gridSpacing: CGFloat { isCompact ? 16 : 22 }
+    private var padding: CGFloat { isCompact ? 20 : 32 }
+
+    /// As many columns as fit (one in a narrow Split View), capped by size class.
+    private func columnCount(for width: CGFloat) -> Int {
+        let fitting = Int((width - padding * 2 + gridSpacing) / (cardWidth + gridSpacing))
+        return max(1, min(model.children.count, isCompact ? 2 : 3, fitting))
+    }
 
     var body: some View {
-        VStack(spacing: 34) {
+        GeometryReader { proxy in
+            ScrollView {
+                content(columns: columnCount(for: proxy.size.width))
+                    // Centres a short list vertically; a long one starts at the top.
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    private func content(columns: Int) -> some View {
+        VStack(spacing: isCompact ? 26 : 34) {
             VStack(spacing: 8) {
-                BrandWordmark(markSize: 42)
+                BrandWordmark(markSize: isCompact ? 34 : 42)
 
                 Text("Who is watching?")
-                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .font(.system(size: isCompact ? 28 : 34, weight: .heavy, design: .rounded))
                     .foregroundStyle(HTheme.ink)
             }
 
             LazyVGrid(
                 columns: Array(
-                    repeating: GridItem(.fixed(220), spacing: 22),
-                    count: max(1, min(model.children.count, 3))
+                    repeating: GridItem(.fixed(cardWidth), spacing: gridSpacing),
+                    count: columns
                 ),
-                spacing: 22
+                spacing: gridSpacing
             ) {
                 ForEach(model.children) { child in
                     Button {
@@ -232,26 +255,26 @@ private struct ProfilePickerView: View {
                             await model.select(child)
                         }
                     } label: {
-                        VStack(spacing: 14) {
-                            AvatarCircle(name: child.name, size: 104)
+                        VStack(spacing: isCompact ? 10 : 14) {
+                            AvatarCircle(name: child.name, size: isCompact ? 76 : 104)
 
                             Text(child.name)
-                                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                                .font(.system(size: isCompact ? 20 : 24, weight: .heavy, design: .rounded))
                                 .foregroundStyle(HTheme.ink)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                         }
-                        .frame(width: 220, height: 200)
+                        .padding(.horizontal, 8)
+                        .frame(width: cardWidth, height: isCompact ? 150 : 200)
                         .background(HTheme.surface)
-                        .clipShape(.rect(cornerRadius: 24))
+                        .clipShape(.rect(cornerRadius: isCompact ? 20 : 24))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Watch as \(child.name)")
                 }
             }
         }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(padding)
     }
 }
 
@@ -275,26 +298,41 @@ private struct ErrorView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
 
-            HStack(spacing: 14) {
-                Button {
-                    Task {
-                        await model.loadChildren()
-                    }
-                } label: {
-                    Label("Try again", systemImage: "arrow.clockwise")
-                        .frame(width: 190, height: 60)
+            // Side by side when there's room, stacked on narrow iPhones.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    retryButton
+                    parentControlsButton
                 }
-                .buttonStyle(PrimaryButtonStyle())
 
-                Button(action: onOpenParentControls) {
-                    Label("Parent controls", systemImage: "lock.shield")
-                        .frame(width: 220, height: 60)
+                VStack(spacing: 12) {
+                    retryButton
+                    parentControlsButton
                 }
-                .buttonStyle(QuietButtonStyle())
             }
         }
         .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var retryButton: some View {
+        Button {
+            Task {
+                await model.loadChildren()
+            }
+        } label: {
+            Label("Try again", systemImage: "arrow.clockwise")
+                .frame(width: 220, height: 56)
+        }
+        .buttonStyle(PrimaryButtonStyle())
+    }
+
+    private var parentControlsButton: some View {
+        Button(action: onOpenParentControls) {
+            Label("Parent controls", systemImage: "lock.shield")
+                .frame(width: 220, height: 56)
+        }
+        .buttonStyle(QuietButtonStyle())
     }
 }
 

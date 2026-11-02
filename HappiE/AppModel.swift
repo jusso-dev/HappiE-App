@@ -585,7 +585,8 @@ final class AppModel {
             return stored
         }
 
-        let device = try await api.registerDevice(childId: child.id)
+        // "Family iPhone" or "Family iPad", so parents can tell devices apart.
+        let device = try await api.registerDevice(childId: child.id, deviceName: "Family \(UIDevice.current.model)")
         defaults.set(device.id.uuidString, forKey: key)
         deviceId = device.id
         return device.id
