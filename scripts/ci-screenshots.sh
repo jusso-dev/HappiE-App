@@ -60,7 +60,8 @@ if [[ ! -f "$SAMPLE" ]]; then
   fi
 fi
 
-MOCK_LOG="$ROOT/build/mock-api.log"
+# Kept with the screenshots so CI failures can be diagnosed.
+MOCK_LOG="$OUT_DIR/mock-api.log"
 python3 "$ROOT/scripts/mock_api.py" "$SAMPLE" 2>"$MOCK_LOG" &
 MOCK_PID=$!
 trap 'kill $MOCK_PID 2>/dev/null || true' EXIT

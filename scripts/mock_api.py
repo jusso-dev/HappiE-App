@@ -10,13 +10,14 @@ AVPlayer requires them for progressive MP4.
 import json
 import os
 import re
+import socket
 import struct
 import sys
+import threading
 import uuid
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = "127.0.0.1"
 PORT = int(os.environ.get("MOCK_API_PORT", "18080"))
 BASE = f"http://localhost:{PORT}"
 SAMPLE_MP4 = sys.argv[1] if len(sys.argv) > 1 else None
@@ -186,5 +187,19 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(media.read(end - start + 1))
 
 
+class IPv6Server(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
 if __name__ == "__main__":
-    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+    # The app connects to "localhost", which can resolve to ::1 first, so
+    # listen on both loopback addresses (and nowhere else).
+    ThreadingHTTPServer.daemon_threads = True
+    servers = [ThreadingHTTPServer(("127.0.0.1", PORT), Handler)]
+    try:
+        servers.append(IPv6Server(("::1", PORT), Handler))
+    except OSError as error:
+        sys.stderr.write(f"mock-api: IPv6 loopback unavailable ({error}); IPv4 only\n")
+    for server in servers[1:]:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    servers[0].serve_forever()
