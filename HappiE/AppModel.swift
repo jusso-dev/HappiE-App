@@ -11,16 +11,6 @@ import Network
 import Observation
 import SwiftUI
 
-/// What the open player will do when the app leaves the foreground.
-enum BackgroundPlayback {
-    /// Nothing keeps playing; the player can close.
-    case stops
-    /// Playing, and automatic Picture in Picture can start (if enabled).
-    case mayStartPictureInPicture
-    /// Picture in Picture is starting or running.
-    case inPictureInPicture
-}
-
 struct PlaybackItem: Identifiable {
     let id = UUID()
     let video: ManifestVideo
@@ -53,15 +43,9 @@ final class AppModel {
     var playbackItem: PlaybackItem?
     var playbackErrorMessage = ""
     var isPreparingPlayback = false
-    /// Lets background recovery spare a player that is (or may be about to
-    /// be) in Picture in Picture.
-    var playerBackgroundPlayback: BackgroundPlayback = .stops {
-        didSet {
-            if isInBackground, playerBackgroundPlayback == .inPictureInPicture {
-                pictureInPictureStartedInBackground = true
-            }
-        }
-    }
+    /// The open player's session, so background recovery reads live PiP
+    /// state and can stop playback without waiting on SwiftUI updates.
+    private weak var playerSession: MediaPlayerManager?
     private var isInBackground = false
     /// Recovery postponed on backgrounding because PiP might start.
     private var isRecoveryDeferred = false
@@ -132,8 +116,8 @@ final class AppModel {
             isRecoveryDeferred = false
             // Automatic PiP never started (e.g. turned off in Settings), so
             // finish the recovery that backgrounding postponed.
-            if !pictureInPictureStartedInBackground {
-                playbackItem = nil
+            if !pictureInPictureStartedInBackground, playerSession?.isPictureInPictureActive != true {
+                stopPlayerForRecovery()
             }
         }
         if !isNetworkAvailable {
@@ -461,15 +445,43 @@ final class AppModel {
     }
 
     func closePlayer() {
-        playerBackgroundPlayback = .stops
+        playbackItem = nil
+    }
+
+    func attachPlayerSession(_ session: MediaPlayerManager) {
+        playerSession = session
+        session.onPictureInPictureStarting = { [weak self] in
+            guard let self, isInBackground else { return }
+            pictureInPictureStartedInBackground = true
+        }
+        session.onPictureInPictureDismissed = { [weak self] in
+            self?.pictureInPictureDismissed()
+        }
+    }
+
+    func detachPlayerSession(_ session: MediaPlayerManager) {
+        session.onPictureInPictureStarting = nil
+        session.onPictureInPictureDismissed = nil
+        if playerSession === session {
+            playerSession = nil
+        }
+    }
+
+    /// Pauses playback directly (the player view may not update while in
+    /// the background), then closes the player.
+    private func stopPlayerForRecovery() {
+        deferredRecoveryTask?.cancel()
+        deferredRecoveryTask = nil
+        isRecoveryDeferred = false
+        playerSession?.pause()
         playbackItem = nil
     }
 
     func recoverForChildUse() {
         isInBackground = true
-        switch playerBackgroundPlayback {
+        switch playerSession?.backgroundPlayback ?? .stops {
         case .stops:
-            playbackItem = nil
+            stopPlayerForRecovery()
         case .mayStartPictureInPicture:
             // Settled on return: closed unless PiP actually started.
             isRecoveryDeferred = true
@@ -480,10 +492,10 @@ final class AppModel {
             deferredRecoveryTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(3))
                 guard let self, !Task.isCancelled, isInBackground, isRecoveryDeferred,
-                      !pictureInPictureStartedInBackground
+                      !pictureInPictureStartedInBackground,
+                      playerSession?.isPictureInPictureActive != true
                 else { return }
-                isRecoveryDeferred = false
-                playbackItem = nil
+                stopPlayerForRecovery()
             }
         case .inPictureInPicture:
             isRecoveryDeferred = true
@@ -493,11 +505,9 @@ final class AppModel {
 
     /// PiP was closed (or failed) rather than restored. If that happened
     /// while the app is in the background, finish the deferred recovery.
-    func pictureInPictureDismissed() {
-        playerBackgroundPlayback = .stops
+    private func pictureInPictureDismissed() {
         if isInBackground {
-            isRecoveryDeferred = false
-            playbackItem = nil
+            stopPlayerForRecovery()
         }
     }
 

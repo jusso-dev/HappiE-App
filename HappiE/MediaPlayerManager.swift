@@ -8,6 +8,16 @@ import UIKit
 import MobileVLCKit
 #endif
 
+/// What an open player session will do when the app leaves the foreground.
+enum BackgroundPlayback {
+    /// Nothing keeps playing; the player can close.
+    case stops
+    /// Playing, and automatic Picture in Picture can start (if enabled).
+    case mayStartPictureInPicture
+    /// Picture in Picture is starting or running.
+    case inPictureInPicture
+}
+
 enum PlaybackEngine: String {
     case apple
     case compatibility
@@ -52,9 +62,13 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     /// Whether PiP could start now for the current item, so automatic PiP
     /// will kick in when the app leaves the foreground.
     @Published private(set) var isPictureInPicturePossible = false
-    /// Fires when PiP ends without the user restoring the full player
-    /// (closed from the PiP window, or failed to start).
-    @Published private(set) var pictureInPictureDismissedEvent = UUID()
+    /// PiP lifecycle hooks for the app model. Called on the main actor
+    /// straight from the delegate, not via SwiftUI view updates, which can
+    /// lag while the app is in the background.
+    var onPictureInPictureStarting: (() -> Void)?
+    /// PiP ended without the full player being restored (closed from the
+    /// PiP window, or failed to start).
+    var onPictureInPictureDismissed: (() -> Void)?
     @Published private(set) var audioTracks: [MediaTrack] = []
     @Published private(set) var subtitleTracks: [MediaTrack] = []
 
@@ -106,6 +120,16 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
     var currentTimeText: String { Self.timeText(currentTime) }
     var durationText: String { Self.timeText(duration) }
     var usesCompatibilityPlayer: Bool { engine == .compatibility }
+    var backgroundPlayback: BackgroundPlayback {
+        if isPictureInPictureActive {
+            return .inPictureInPicture
+        }
+        if isPlaying && isPictureInPicturePossible {
+            return .mayStartPictureInPicture
+        }
+        return .stops
+    }
+
     var isPictureInPictureSupported: Bool {
         !usesCompatibilityPlayer && AVPictureInPictureController.isPictureInPictureSupported()
     }
@@ -140,7 +164,7 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor [weak self] in
-            self?.isPictureInPictureActive = true
+            self?.pictureInPictureStarting()
         }
     }
 
@@ -148,8 +172,13 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor [weak self] in
-            self?.isPictureInPictureActive = true
+            self?.pictureInPictureStarting()
         }
+    }
+
+    private func pictureInPictureStarting() {
+        isPictureInPictureActive = true
+        onPictureInPictureStarting?()
     }
 
     nonisolated func pictureInPictureController(
@@ -159,7 +188,7 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
         Task { @MainActor [weak self] in
             guard let self else { return }
             isPictureInPictureActive = false
-            pictureInPictureDismissedEvent = UUID()
+            onPictureInPictureDismissed?()
         }
     }
 
@@ -181,7 +210,7 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
             guard let self else { return }
             isPictureInPictureActive = false
             if !isRestoringFromPictureInPicture {
-                pictureInPictureDismissedEvent = UUID()
+                onPictureInPictureDismissed?()
             }
             isRestoringFromPictureInPicture = false
         }

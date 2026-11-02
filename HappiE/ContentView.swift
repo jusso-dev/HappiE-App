@@ -81,11 +81,11 @@ struct ContentView: View {
                 onProgress: { videoId, position, completed, force, audioIndex, subtitleIndex in
                     model.reportPlaybackProgress(videoId: videoId, position: position, completed: completed, force: force, audioIndex: audioIndex, subtitleIndex: subtitleIndex)
                 },
-                onBackgroundPlaybackChange: { playback in
-                    model.playerBackgroundPlayback = playback
+                onAttachSession: { session in
+                    model.attachPlayerSession(session)
                 },
-                onPictureInPictureDismissed: {
-                    model.pictureInPictureDismissed()
+                onDetachSession: { session in
+                    model.detachPlayerSession(session)
                 }
             ) {
                 model.closePlayer()

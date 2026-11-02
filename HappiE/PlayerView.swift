@@ -20,10 +20,10 @@ struct VideoPlayerScreen: View {
     let onRefreshVideos: () async -> [ManifestVideo]
     /// (videoId, positionSeconds, completed, force, audioIndex, subtitleIndex)
     let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
-    /// Reports whether playback should survive the app going to the background.
-    let onBackgroundPlaybackChange: (BackgroundPlayback) -> Void
-    /// PiP ended without the full player being restored.
-    let onPictureInPictureDismissed: () -> Void
+    /// Hands the playback session to the app model while the player is up,
+    /// so background recovery can read live PiP state and stop playback.
+    let onAttachSession: (MediaPlayerManager) -> Void
+    let onDetachSession: (MediaPlayerManager) -> Void
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -57,8 +57,8 @@ struct VideoPlayerScreen: View {
         onSelectTracks: @escaping (ManifestVideo, Int?, Int) async -> PlaybackItem?,
         onRefreshVideos: @escaping () async -> [ManifestVideo],
         onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
-        onBackgroundPlaybackChange: @escaping (BackgroundPlayback) -> Void = { _ in },
-        onPictureInPictureDismissed: @escaping () -> Void = {},
+        onAttachSession: @escaping (MediaPlayerManager) -> Void = { _ in },
+        onDetachSession: @escaping (MediaPlayerManager) -> Void = { _ in },
         onClose: @escaping () -> Void
     ) {
         self.item = item
@@ -67,8 +67,8 @@ struct VideoPlayerScreen: View {
         self.onSelectTracks = onSelectTracks
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
-        self.onBackgroundPlaybackChange = onBackgroundPlaybackChange
-        self.onPictureInPictureDismissed = onPictureInPictureDismissed
+        self.onAttachSession = onAttachSession
+        self.onDetachSession = onDetachSession
         self.onClose = onClose
         _controller = StateObject(wrappedValue: MediaPlayerManager(url: item.url))
         _currentItem = State(initialValue: item)
@@ -77,19 +77,6 @@ struct VideoPlayerScreen: View {
 
     private var suggestedVideos: [ManifestVideo] {
         playerVideos.filter { $0.id != currentItem.video.id }
-    }
-
-    /// Playing video may start Picture in Picture automatically on the way
-    /// to the background (unless the user turned that off in Settings), so
-    /// the player must stay alive long enough to find out.
-    private var backgroundPlayback: BackgroundPlayback {
-        if controller.isPictureInPictureActive {
-            return .inPictureInPicture
-        }
-        if controller.isPlaying && controller.isPictureInPicturePossible {
-            return .mayStartPictureInPicture
-        }
-        return .stops
     }
 
     private var nextVideo: ManifestVideo? {
@@ -160,6 +147,7 @@ struct VideoPlayerScreen: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
+            onAttachSession(controller)
             UIApplication.shared.isIdleTimerDisabled = true
             if currentItem.resumeAt > 0 {
                 controller.replaceCurrentItem(with: currentItem.url, startAt: currentItem.resumeAt)
@@ -172,16 +160,10 @@ struct VideoPlayerScreen: View {
         }
         .onDisappear {
             cancelPlayerTasks()
-            onBackgroundPlaybackChange(.stops)
+            onDetachSession(controller)
             UIApplication.shared.isIdleTimerDisabled = false
             reportProgress(position: controller.currentTime, force: true)
             controller.pause()
-        }
-        .onChange(of: backgroundPlayback, initial: true) { _, playback in
-            onBackgroundPlaybackChange(playback)
-        }
-        .onChange(of: controller.pictureInPictureDismissedEvent) {
-            onPictureInPictureDismissed()
         }
         .onChange(of: controller.currentTime) {
             guard controller.isPlaying else { return }
