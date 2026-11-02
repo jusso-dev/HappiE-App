@@ -39,9 +39,6 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.light)
-        // Text scales with Dynamic Type; the largest accessibility sizes are
-        // capped so the kid-sized layouts stay usable.
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .task {
             // UI-test hook: present the parental gate immediately.
             if CommandLine.arguments.contains("-uitest-parent-gate") {
@@ -108,6 +105,10 @@ struct ContentView: View {
                 isShowingParentControls = false
             }
         }
+        // Text scales with Dynamic Type; the largest accessibility sizes are
+        // capped so the kid-sized layouts stay usable. Applied outside the
+        // presentation modifiers so the sheets and player inherit it too.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 }
 

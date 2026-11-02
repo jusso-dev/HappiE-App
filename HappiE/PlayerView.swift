@@ -142,6 +142,10 @@ struct VideoPlayerScreen: View {
                     .zIndex(7)
             }
         }
+        // The chrome is laid out around fixed control sizes over the video.
+        // Applied before the sheets so the grown-up gate and track picker
+        // keep the app-wide limit.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .background(Color.black.ignoresSafeArea())
         .onAppear {
             onAttachSession(controller)
@@ -204,8 +208,6 @@ struct VideoPlayerScreen: View {
         }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        // The chrome is laid out around fixed control sizes over the video.
-        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .animation(.easeOut(duration: 0.18), value: controlsVisible)
         .accessibilityLabel("Playing \(currentItem.video.displayTitle)")
     }
