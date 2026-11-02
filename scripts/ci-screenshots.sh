@@ -119,7 +119,8 @@ for device in iphone ipad; do
   launch "$udid" "$device-03-parent-gate" "/sync" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
   launch "$udid" "$device-04-error" "" -HappiEAPIBaseURL "http://localhost:9"
   if [[ -f "$SAMPLE" ]]; then
-    launch "$udid" "$device-05-player" "GET /media/sample.mp4" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
+    # Capture soon after the video loads, before the controls auto-hide (4s).
+    SETTLE=1 launch "$udid" "$device-05-player" "GET /media/sample.mp4" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
   fi
 done
 
