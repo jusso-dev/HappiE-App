@@ -121,6 +121,7 @@ private struct HomeHeaderBar: View {
     let onOpenParentControls: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
 
@@ -135,10 +136,14 @@ private struct HomeHeaderBar: View {
                     HStack(spacing: 8) {
                         AvatarCircle(name: child.name, size: 34)
 
-                        Text(child.name)
-                            .scaledFont(size: 17, weight: .bold, relativeTo: .body)
-                            .foregroundStyle(HTheme.ink)
-                            .lineLimit(1)
+                        // At accessibility sizes on iPhone the avatar alone
+                        // identifies the child (VoiceOver still reads the name).
+                        if !(isCompact && dynamicTypeSize.isAccessibilitySize) {
+                            Text(child.name)
+                                .scaledFont(size: 17, weight: .bold, relativeTo: .body)
+                                .foregroundStyle(HTheme.ink)
+                                .lineLimit(1)
+                        }
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Watching as \(child.name)")
@@ -292,20 +297,15 @@ struct VideoCard: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
-                    HStack(spacing: 6) {
-                        if !video.durationText.isEmpty {
-                            Text(video.durationText)
+                    // One row when it fits; stacked at large text sizes so
+                    // "Saved" and "Watched" never truncate.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            metadataItems(separated: true)
                         }
 
-                        if offlineState.isDownloaded {
-                            Text("•")
-                            Label("Saved", systemImage: "arrow.down.circle.fill")
-                                .foregroundStyle(HTheme.accentText)
-                        }
-
-                        if let historyEntry, historyEntry.completed {
-                            Text("•")
-                            Label("Watched", systemImage: "checkmark")
+                        VStack(alignment: .leading, spacing: 2) {
+                            metadataItems(separated: false)
                         }
                     }
                     .scaledFont(size: 14, weight: .medium, relativeTo: .footnote)
@@ -319,6 +319,24 @@ struct VideoCard: View {
             .padding(.horizontal, 4)
         }
         .opacity(isPlayable ? 1 : 0.45)
+    }
+
+    @ViewBuilder
+    private func metadataItems(separated: Bool) -> some View {
+        if !video.durationText.isEmpty {
+            Text(video.durationText)
+        }
+
+        if offlineState.isDownloaded {
+            if separated { Text("•") }
+            Label("Saved", systemImage: "arrow.down.circle.fill")
+                .foregroundStyle(HTheme.accentText)
+        }
+
+        if let historyEntry, historyEntry.completed {
+            if separated { Text("•") }
+            Label("Watched", systemImage: "checkmark")
+        }
     }
 }
 
