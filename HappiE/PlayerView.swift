@@ -20,6 +20,10 @@ struct VideoPlayerScreen: View {
     let onRefreshVideos: () async -> [ManifestVideo]
     /// (videoId, positionSeconds, completed, force, audioIndex, subtitleIndex)
     let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
+    /// Hands the playback session to the app model while the player is up,
+    /// so background recovery can read live PiP state and stop playback.
+    let onAttachSession: (MediaPlayerManager) -> Void
+    let onDetachSession: (MediaPlayerManager) -> Void
     let onClose: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -53,6 +57,8 @@ struct VideoPlayerScreen: View {
         onSelectTracks: @escaping (ManifestVideo, Int?, Int) async -> PlaybackItem?,
         onRefreshVideos: @escaping () async -> [ManifestVideo],
         onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
+        onAttachSession: @escaping (MediaPlayerManager) -> Void = { _ in },
+        onDetachSession: @escaping (MediaPlayerManager) -> Void = { _ in },
         onClose: @escaping () -> Void
     ) {
         self.item = item
@@ -61,6 +67,8 @@ struct VideoPlayerScreen: View {
         self.onSelectTracks = onSelectTracks
         self.onRefreshVideos = onRefreshVideos
         self.onProgress = onProgress
+        self.onAttachSession = onAttachSession
+        self.onDetachSession = onDetachSession
         self.onClose = onClose
         _controller = StateObject(wrappedValue: MediaPlayerManager(url: item.url))
         _currentItem = State(initialValue: item)
@@ -139,6 +147,7 @@ struct VideoPlayerScreen: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
+            onAttachSession(controller)
             UIApplication.shared.isIdleTimerDisabled = true
             if currentItem.resumeAt > 0 {
                 controller.replaceCurrentItem(with: currentItem.url, startAt: currentItem.resumeAt)
@@ -151,6 +160,7 @@ struct VideoPlayerScreen: View {
         }
         .onDisappear {
             cancelPlayerTasks()
+            onDetachSession(controller)
             UIApplication.shared.isIdleTimerDisabled = false
             reportProgress(position: controller.currentTime, force: true)
             controller.pause()
@@ -158,6 +168,13 @@ struct VideoPlayerScreen: View {
         .onChange(of: controller.currentTime) {
             guard controller.isPlaying else { return }
             reportProgress(position: controller.currentTime)
+        }
+        .onChange(of: controller.isPlaying) { _, isPlaying in
+            // Playback resumed from outside our controls (Control Center,
+            // the PiP window): let visible controls auto-hide again.
+            if isPlaying, controlsVisible {
+                scheduleControlsHide()
+            }
         }
         .onChange(of: controller.endedEvent) {
             handleVideoEnded()

@@ -61,6 +61,65 @@ class StateRaceRegressionTests(unittest.TestCase):
 
         self.assertFalse(info["UIApplicationSceneManifest"]["UIApplicationSupportsMultipleScenes"])
 
+    def test_background_keeps_a_player_that_is_in_picture_in_picture(self):
+        model = source("AppModel.swift")
+        recover = model.split("func recoverForChildUse()", 1)[1].split("\n    }\n", 1)[0]
+
+        self.assertIn("switch playerSession?.backgroundPlayback", recover)
+        self.assertIn("case .stops:\n            stopPlayerForRecovery()", recover)
+        may_start = recover.split("case .mayStartPictureInPicture:", 1)[1].split("case .inPictureInPicture:", 1)[0]
+        in_pip = recover.split("case .inPictureInPicture:", 1)[1]
+        # PiP (or its chance to start) keeps the player; any close is deferred.
+        self.assertNotIn("stopPlayerForRecovery()", in_pip)
+        self.assertNotIn("stopPlayerForRecovery()", may_start.split("Task {", 1)[0])
+        self.assertIn("onAttachSession", source("ContentView.swift"))
+
+    def test_recovery_stops_playback_without_waiting_on_view_updates(self):
+        model = source("AppModel.swift")
+        stop = model.split("private func stopPlayerForRecovery()", 1)[1].split("\n    }\n", 1)[0]
+
+        # Pause the session directly; the cover's onDisappear may not run
+        # while the app is in the background.
+        self.assertLess(stop.index("playerSession?.pause()"), stop.index("playbackItem = nil"))
+        # PiP lifecycle reaches the model from the delegate, not via onChange.
+        self.assertIn("session.onPictureInPictureStarting", model)
+        self.assertIn("session.onPictureInPictureDismissed", model)
+        self.assertNotIn("pictureInPictureDismissedEvent", source("PlayerView.swift"))
+
+    def test_deferred_recovery_completes_when_pip_never_started(self):
+        model = source("AppModel.swift")
+        active = model.split("func handleBecameActive()", 1)[1].split("if !isNetworkAvailable", 1)[0]
+
+        # Automatic PiP can be turned off in Settings: being merely eligible
+        # must not leave the player open after returning to the app.
+        self.assertIn("if isRecoveryDeferred", active)
+        self.assertIn("if !pictureInPictureStartedInBackground", active)
+        self.assertIn("stopPlayerForRecovery()", active)
+
+        # With background audio the app keeps running, so a grace period
+        # also stops playback that PiP didn't pick up, checking live state.
+        may_start = model.split("case .mayStartPictureInPicture:", 1)[1].split("case .inPictureInPicture:", 1)[0]
+        self.assertIn("Task.sleep", may_start)
+        self.assertIn("!pictureInPictureStartedInBackground", may_start)
+        self.assertIn("playerSession?.isPictureInPictureActive != true", may_start)
+        self.assertIn("deferredRecoveryTask?.cancel()", active)
+
+    def test_background_continuation_follows_the_real_pip_lifecycle(self):
+        manager = source("MediaPlayerManager.swift")
+        model = source("AppModel.swift")
+        continues = manager.split("var backgroundPlayback: BackgroundPlayback {", 1)[1].split("\n    }\n", 1)[0]
+        dismissed = model.split("func pictureInPictureDismissed()", 1)[1].split("\n    }", 1)[0]
+
+        # Automatic PiP needs it to be possible for this item, not just the device.
+        self.assertIn("isPictureInPicturePossible", continues)
+        self.assertNotIn("isPictureInPictureSupported", continues)
+        for delegate in ("WillStartPictureInPicture", "failedToStartPictureInPictureWithError",
+                         "restoreUserInterfaceForPictureInPictureStop", "DidStopPictureInPicture"):
+            self.assertIn(delegate, manager)
+        self.assertIn("observe(\\.timeControlStatus", manager)
+        # Closing PiP while backgrounded finishes the deferred recovery.
+        self.assertIn("if isInBackground", dismissed)
+        self.assertIn("stopPlayerForRecovery()", dismissed)
 
 if __name__ == "__main__":
     unittest.main()

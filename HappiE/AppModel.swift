@@ -43,6 +43,14 @@ final class AppModel {
     var playbackItem: PlaybackItem?
     var playbackErrorMessage = ""
     var isPreparingPlayback = false
+    /// The open player's session, so background recovery reads live PiP
+    /// state and can stop playback without waiting on SwiftUI updates.
+    private weak var playerSession: MediaPlayerManager?
+    private var isInBackground = false
+    /// Recovery postponed on backgrounding because PiP might start.
+    private var isRecoveryDeferred = false
+    private var pictureInPictureStartedInBackground = false
+    private var deferredRecoveryTask: Task<Void, Never>?
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
@@ -101,6 +109,17 @@ final class AppModel {
     /// Called when the app returns to the foreground — the network may have
     /// changed (airplane mode toggled) while we were suspended.
     func handleBecameActive() {
+        isInBackground = false
+        deferredRecoveryTask?.cancel()
+        deferredRecoveryTask = nil
+        if isRecoveryDeferred {
+            isRecoveryDeferred = false
+            // Automatic PiP never started (e.g. turned off in Settings), so
+            // finish the recovery that backgrounding postponed.
+            if !pictureInPictureStartedInBackground, playerSession?.isPictureInPictureActive != true {
+                stopPlayerForRecovery()
+            }
+        }
         if !isNetworkAvailable {
             markOffline()
         } else if isOfflineMode {
@@ -429,8 +448,67 @@ final class AppModel {
         playbackItem = nil
     }
 
-    func recoverForChildUse() {
+    func attachPlayerSession(_ session: MediaPlayerManager) {
+        playerSession = session
+        session.onPictureInPictureStarting = { [weak self] in
+            guard let self, isInBackground else { return }
+            pictureInPictureStartedInBackground = true
+        }
+        session.onPictureInPictureDismissed = { [weak self] in
+            self?.pictureInPictureDismissed()
+        }
+    }
+
+    func detachPlayerSession(_ session: MediaPlayerManager) {
+        session.onPictureInPictureStarting = nil
+        session.onPictureInPictureDismissed = nil
+        if playerSession === session {
+            playerSession = nil
+        }
+    }
+
+    /// Pauses playback directly (the player view may not update while in
+    /// the background), then closes the player.
+    private func stopPlayerForRecovery() {
+        deferredRecoveryTask?.cancel()
+        deferredRecoveryTask = nil
+        isRecoveryDeferred = false
+        playerSession?.pause()
         playbackItem = nil
+    }
+
+    func recoverForChildUse() {
+        isInBackground = true
+        switch playerSession?.backgroundPlayback ?? .stops {
+        case .stops:
+            stopPlayerForRecovery()
+        case .mayStartPictureInPicture:
+            // Settled on return: closed unless PiP actually started.
+            isRecoveryDeferred = true
+            pictureInPictureStartedInBackground = false
+            // Background audio keeps the app running (e.g. screen lock with
+            // no PiP), so also stop it promptly instead of on return.
+            deferredRecoveryTask?.cancel()
+            deferredRecoveryTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled, isInBackground, isRecoveryDeferred,
+                      !pictureInPictureStartedInBackground,
+                      playerSession?.isPictureInPictureActive != true
+                else { return }
+                stopPlayerForRecovery()
+            }
+        case .inPictureInPicture:
+            isRecoveryDeferred = true
+            pictureInPictureStartedInBackground = true
+        }
+    }
+
+    /// PiP was closed (or failed) rather than restored. If that happened
+    /// while the app is in the background, finish the deferred recovery.
+    private func pictureInPictureDismissed() {
+        if isInBackground {
+            stopPlayerForRecovery()
+        }
     }
 
     /// Saves progress locally and mirrors it to the server, throttled so the
