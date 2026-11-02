@@ -11,6 +11,16 @@ import Network
 import Observation
 import SwiftUI
 
+/// What the open player will do when the app leaves the foreground.
+enum BackgroundPlayback {
+    /// Nothing keeps playing; the player can close.
+    case stops
+    /// Playing, and automatic Picture in Picture can start (if enabled).
+    case mayStartPictureInPicture
+    /// Picture in Picture is starting or running.
+    case inPictureInPicture
+}
+
 struct PlaybackItem: Identifiable {
     let id = UUID()
     let video: ManifestVideo
@@ -43,10 +53,19 @@ final class AppModel {
     var playbackItem: PlaybackItem?
     var playbackErrorMessage = ""
     var isPreparingPlayback = false
-    /// True while the open player is (or is about to be) in Picture in
-    /// Picture, so leaving the app must not tear it down.
-    var playerContinuesInBackground = false
+    /// Lets background recovery spare a player that is (or may be about to
+    /// be) in Picture in Picture.
+    var playerBackgroundPlayback: BackgroundPlayback = .stops {
+        didSet {
+            if isInBackground, playerBackgroundPlayback == .inPictureInPicture {
+                pictureInPictureStartedInBackground = true
+            }
+        }
+    }
     private var isInBackground = false
+    /// Recovery postponed on backgrounding because PiP might start.
+    private var isRecoveryDeferred = false
+    private var pictureInPictureStartedInBackground = false
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
@@ -106,6 +125,14 @@ final class AppModel {
     /// changed (airplane mode toggled) while we were suspended.
     func handleBecameActive() {
         isInBackground = false
+        if isRecoveryDeferred {
+            isRecoveryDeferred = false
+            // Automatic PiP never started (e.g. turned off in Settings), so
+            // finish the recovery that backgrounding postponed.
+            if !pictureInPictureStartedInBackground {
+                playbackItem = nil
+            }
+        }
         if !isNetworkAvailable {
             markOffline()
         } else if isOfflineMode {
@@ -431,21 +458,31 @@ final class AppModel {
     }
 
     func closePlayer() {
-        playerContinuesInBackground = false
+        playerBackgroundPlayback = .stops
         playbackItem = nil
     }
 
     func recoverForChildUse() {
         isInBackground = true
-        guard !playerContinuesInBackground else { return }
-        playbackItem = nil
+        switch playerBackgroundPlayback {
+        case .stops:
+            playbackItem = nil
+        case .mayStartPictureInPicture:
+            // Settled on return: closed unless PiP actually started.
+            isRecoveryDeferred = true
+            pictureInPictureStartedInBackground = false
+        case .inPictureInPicture:
+            isRecoveryDeferred = true
+            pictureInPictureStartedInBackground = true
+        }
     }
 
     /// PiP was closed (or failed) rather than restored. If that happened
     /// while the app is in the background, finish the deferred recovery.
     func pictureInPictureDismissed() {
-        playerContinuesInBackground = false
+        playerBackgroundPlayback = .stops
         if isInBackground {
+            isRecoveryDeferred = false
             playbackItem = nil
         }
     }

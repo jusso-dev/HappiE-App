@@ -63,18 +63,29 @@ class StateRaceRegressionTests(unittest.TestCase):
 
     def test_background_keeps_a_player_that_is_in_picture_in_picture(self):
         model = source("AppModel.swift")
-        recover = model.split("func recoverForChildUse()", 1)[1].split("}", 1)[0]
+        recover = model.split("func recoverForChildUse()", 1)[1].split("\n    }\n", 1)[0]
         close = model.split("func closePlayer()", 1)[1].split("}", 1)[0]
 
-        self.assertIn("guard !playerContinuesInBackground", recover)
-        self.assertIn("playerContinuesInBackground = false", close)
+        self.assertIn("case .stops:\n            playbackItem = nil", recover)
+        self.assertNotIn("playbackItem = nil", recover.split("case .stops:", 1)[1].split("case .mayStart", 1)[1])
+        self.assertIn("playerBackgroundPlayback = .stops", close)
         self.assertIn("onBackgroundPlaybackChange", source("ContentView.swift"))
+
+    def test_deferred_recovery_completes_when_pip_never_started(self):
+        model = source("AppModel.swift")
+        active = model.split("func handleBecameActive()", 1)[1].split("if !isNetworkAvailable", 1)[0]
+
+        # Automatic PiP can be turned off in Settings: being merely eligible
+        # must not leave the player open after returning to the app.
+        self.assertIn("if isRecoveryDeferred", active)
+        self.assertIn("if !pictureInPictureStartedInBackground", active)
+        self.assertIn("playbackItem = nil", active)
 
     def test_background_continuation_follows_the_real_pip_lifecycle(self):
         player = source("PlayerView.swift")
         manager = source("MediaPlayerManager.swift")
         model = source("AppModel.swift")
-        continues = player.split("private var continuesInBackground: Bool {", 1)[1].split("}", 1)[0]
+        continues = player.split("private var backgroundPlayback: BackgroundPlayback {", 1)[1].split("\n    }\n", 1)[0]
         dismissed = model.split("func pictureInPictureDismissed()", 1)[1].split("\n    }", 1)[0]
 
         # Automatic PiP needs it to be possible for this item, not just the device.

@@ -81,8 +81,8 @@ struct ContentView: View {
                 onProgress: { videoId, position, completed, force, audioIndex, subtitleIndex in
                     model.reportPlaybackProgress(videoId: videoId, position: position, completed: completed, force: force, audioIndex: audioIndex, subtitleIndex: subtitleIndex)
                 },
-                onBackgroundPlaybackChange: { continues in
-                    model.playerContinuesInBackground = continues
+                onBackgroundPlaybackChange: { playback in
+                    model.playerBackgroundPlayback = playback
                 },
                 onPictureInPictureDismissed: {
                     model.pictureInPictureDismissed()

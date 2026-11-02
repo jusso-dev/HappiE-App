@@ -21,7 +21,7 @@ struct VideoPlayerScreen: View {
     /// (videoId, positionSeconds, completed, force, audioIndex, subtitleIndex)
     let onProgress: (UUID, Double, Bool, Bool, Int?, Int) -> Void
     /// Reports whether playback should survive the app going to the background.
-    let onBackgroundPlaybackChange: (Bool) -> Void
+    let onBackgroundPlaybackChange: (BackgroundPlayback) -> Void
     /// PiP ended without the full player being restored.
     let onPictureInPictureDismissed: () -> Void
     let onClose: () -> Void
@@ -57,7 +57,7 @@ struct VideoPlayerScreen: View {
         onSelectTracks: @escaping (ManifestVideo, Int?, Int) async -> PlaybackItem?,
         onRefreshVideos: @escaping () async -> [ManifestVideo],
         onProgress: @escaping (UUID, Double, Bool, Bool, Int?, Int) -> Void,
-        onBackgroundPlaybackChange: @escaping (Bool) -> Void = { _ in },
+        onBackgroundPlaybackChange: @escaping (BackgroundPlayback) -> Void = { _ in },
         onPictureInPictureDismissed: @escaping () -> Void = {},
         onClose: @escaping () -> Void
     ) {
@@ -79,12 +79,17 @@ struct VideoPlayerScreen: View {
         playerVideos.filter { $0.id != currentItem.video.id }
     }
 
-    /// Playing video starts Picture in Picture automatically on the way to
-    /// the background (when PiP is possible for this item), so the player
-    /// must stay alive for it.
-    private var continuesInBackground: Bool {
-        controller.isPictureInPictureActive
-            || (controller.isPlaying && controller.isPictureInPicturePossible)
+    /// Playing video may start Picture in Picture automatically on the way
+    /// to the background (unless the user turned that off in Settings), so
+    /// the player must stay alive long enough to find out.
+    private var backgroundPlayback: BackgroundPlayback {
+        if controller.isPictureInPictureActive {
+            return .inPictureInPicture
+        }
+        if controller.isPlaying && controller.isPictureInPicturePossible {
+            return .mayStartPictureInPicture
+        }
+        return .stops
     }
 
     private var nextVideo: ManifestVideo? {
@@ -167,13 +172,13 @@ struct VideoPlayerScreen: View {
         }
         .onDisappear {
             cancelPlayerTasks()
-            onBackgroundPlaybackChange(false)
+            onBackgroundPlaybackChange(.stops)
             UIApplication.shared.isIdleTimerDisabled = false
             reportProgress(position: controller.currentTime, force: true)
             controller.pause()
         }
-        .onChange(of: continuesInBackground, initial: true) { _, continues in
-            onBackgroundPlaybackChange(continues)
+        .onChange(of: backgroundPlayback, initial: true) { _, playback in
+            onBackgroundPlaybackChange(playback)
         }
         .onChange(of: controller.pictureInPictureDismissedEvent) {
             onPictureInPictureDismissed()
