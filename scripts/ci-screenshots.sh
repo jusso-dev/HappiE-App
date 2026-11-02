@@ -50,9 +50,14 @@ xcodebuild -project "$ROOT/HappiE.xcodeproj" -scheme HappiE \
 APP="$DERIVED/Build/Products/Debug-iphonesimulator/HappiE.app"
 
 SAMPLE="$ROOT/build/sample.mp4"
-if [[ ! -f "$SAMPLE" ]] && command -v ffmpeg >/dev/null; then
-  ffmpeg -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=30 -t 20 \
-    -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$SAMPLE" || true
+if [[ ! -f "$SAMPLE" ]]; then
+  if command -v ffmpeg >/dev/null; then
+    # A failure here is fatal, so the player screens can't silently vanish.
+    ffmpeg -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=30 -t 20 \
+      -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$SAMPLE"
+  else
+    echo "::warning::ffmpeg not found; skipping player screenshots"
+  fi
 fi
 
 MOCK_LOG="$ROOT/build/mock-api.log"
