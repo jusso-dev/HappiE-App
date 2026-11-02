@@ -83,8 +83,10 @@ launch() {
     local waited=0
     until tail -n +"$((seen + 1))" "$MOCK_LOG" | grep -q -- "$ready"; do
       if (( waited >= READY_TIMEOUT )); then
-        echo "::warning::$name: no '$ready' request after ${READY_TIMEOUT}s; capturing anyway"
-        break
+        # Fail loudly: a loading-screen capture must not pass as the real screen.
+        xcrun simctl io "$udid" screenshot "$OUT_DIR/$name-TIMEOUT.png" >/dev/null 2>&1 || true
+        echo "::error::$name: no '$ready' request after ${READY_TIMEOUT}s"
+        exit 1
       fi
       sleep 1
       waited=$((waited + 1))
