@@ -8,9 +8,10 @@ OUT_DIR="${OUT_DIR:-$ROOT/build/screenshots}"
 DERIVED="${DERIVED:-$ROOT/build/DerivedData}"
 BUNDLE_ID="au.com.HappiE"
 CHILD_ID="c0000000-0000-4000-8000-000000000001"
-SETTLE="${SETTLE:-7}"
+SETTLE="${SETTLE:-4}"
+READY_TIMEOUT="${READY_TIMEOUT:-120}"
 
-mkdir -p "$OUT_DIR"
+mkdir -p "$OUT_DIR" "$ROOT/build"
 
 pick_device() {
   # Simulator on the newest iOS runtime: the first preferred name that
@@ -39,6 +40,10 @@ IPHONE="${IPHONE_UDID:-$(pick_device "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro"
 IPAD="${IPAD_UDID:-$(pick_device "iPad Air 11-inch (M4)" "iPad Air 11-inch (M3)" "iPad (A16)")}"
 [[ -n "$IPHONE" && -n "$IPAD" ]] || { echo "No iPhone/iPad simulator available" >&2; exit 1; }
 
+# Cold boots take minutes on CI runners; let them overlap the build.
+xcrun simctl boot "$IPHONE" 2>/dev/null || true
+xcrun simctl boot "$IPAD" 2>/dev/null || true
+
 xcodebuild -project "$ROOT/HappiE.xcodeproj" -scheme HappiE \
   -destination "generic/platform=iOS Simulator" -derivedDataPath "$DERIVED" \
   CODE_SIGNING_ALLOWED=NO build -quiet
@@ -50,7 +55,8 @@ if [[ ! -f "$SAMPLE" ]] && command -v ffmpeg >/dev/null; then
     -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$SAMPLE" || true
 fi
 
-python3 "$ROOT/scripts/mock_api.py" "$SAMPLE" &
+MOCK_LOG="$ROOT/build/mock-api.log"
+python3 "$ROOT/scripts/mock_api.py" "$SAMPLE" 2>"$MOCK_LOG" &
 MOCK_PID=$!
 trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
 for _ in $(seq 1 50); do
@@ -59,15 +65,33 @@ for _ in $(seq 1 50); do
 done
 curl -sf "http://127.0.0.1:18080/children" >/dev/null || { echo "Mock API did not start" >&2; exit 1; }
 
-# launch <udid> <name> [app arguments...]: fresh install, launch, capture.
+# launch <udid> <name> <ready-pattern> [app arguments...]: fresh install,
+# launch, wait until the mock API logs a request matching <ready-pattern>
+# (the screen's data has been fetched; empty pattern = no request to wait
+# for), let it render, then capture.
 launch() {
-  local udid="$1" name="$2"
-  shift 2
+  local udid="$1" name="$2" ready="$3"
+  shift 3
   xcrun simctl terminate "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   xcrun simctl uninstall "$udid" "$BUNDLE_ID" >/dev/null 2>&1 || true
   xcrun simctl install "$udid" "$APP" || return 1
+  local seen
+  seen=$(wc -l <"$MOCK_LOG")
   # Explicit returns: errexit is off inside `if ! launch ...`.
   xcrun simctl launch "$udid" "$BUNDLE_ID" "$@" >/dev/null || return 1
+  if [[ -n "$ready" ]]; then
+    local waited=0
+    until tail -n +"$((seen + 1))" "$MOCK_LOG" | grep -q -- "$ready"; do
+      if (( waited >= READY_TIMEOUT )); then
+        echo "::warning::$name: no '$ready' request after ${READY_TIMEOUT}s; capturing anyway"
+        break
+      fi
+      sleep 1
+      waited=$((waited + 1))
+    done
+  else
+    sleep 15
+  fi
   sleep "$SETTLE"
   xcrun simctl io "$udid" screenshot "$OUT_DIR/$name.png" >/dev/null || return 1
   echo "captured $name"
@@ -80,15 +104,15 @@ for device in iphone ipad; do
   xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 \
     --wifiBars 3 >/dev/null 2>&1 || true
 
-  if ! launch "$udid" "$device-01-profiles" -HappiESelectedChildId none; then
+  if ! launch "$udid" "$device-01-profiles" "GET /children" -HappiESelectedChildId none; then
     echo "::warning::HappiE does not install on the $device simulator; skipping its screens"
     continue
   fi
-  launch "$udid" "$device-02-home" -HappiESelectedChildId "$CHILD_ID"
-  launch "$udid" "$device-03-parent-gate" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
-  launch "$udid" "$device-04-error" -HappiEAPIBaseURL "http://localhost:9"
+  launch "$udid" "$device-02-home" "GET /thumbs/" -HappiESelectedChildId "$CHILD_ID"
+  launch "$udid" "$device-03-parent-gate" "/sync" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
+  launch "$udid" "$device-04-error" "" -HappiEAPIBaseURL "http://localhost:9"
   if [[ -f "$SAMPLE" ]]; then
-    launch "$udid" "$device-05-player" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
+    launch "$udid" "$device-05-player" "GET /media/sample.mp4" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
   fi
 done
 
