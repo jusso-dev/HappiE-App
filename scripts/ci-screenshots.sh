@@ -64,7 +64,16 @@ fi
 MOCK_LOG="$OUT_DIR/mock-api.log"
 python3 "$ROOT/scripts/mock_api.py" "$SAMPLE" 2>"$MOCK_LOG" &
 MOCK_PID=$!
-trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
+# Simulator whose text size we changed, and the size to restore on exit.
+RESTORE_SIZE_UDID=""
+RESTORE_SIZE="large"
+cleanup() {
+  kill "$MOCK_PID" 2>/dev/null || true
+  if [[ -n "$RESTORE_SIZE_UDID" ]]; then
+    xcrun simctl ui "$RESTORE_SIZE_UDID" content_size "$RESTORE_SIZE" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 for _ in $(seq 1 50); do
   curl -sf "http://127.0.0.1:18080/children" >/dev/null && break
   sleep 0.2
@@ -122,6 +131,21 @@ for device in iphone ipad; do
   if [[ -f "$SAMPLE" ]]; then
     # Capture soon after the video loads, before the controls auto-hide (4s).
     SETTLE=1 launch "$udid" "$device-05-player" "GET /media/sample.mp4" -HappiESelectedChildId "$CHILD_ID" -uitest-play-first-video
+  fi
+  if [[ "$device" == iphone ]]; then
+    # Dynamic Type check at a large accessibility text size. The original
+    # size is restored by the EXIT trap, even if a capture fails.
+    original_size=$(xcrun simctl ui "$udid" content_size 2>/dev/null | tr -d '[:space:]' || true)
+    if xcrun simctl ui "$udid" content_size accessibility-large >/dev/null 2>&1; then
+      RESTORE_SIZE_UDID="$udid"
+      RESTORE_SIZE="${original_size:-large}"
+      launch "$udid" "$device-06-home-large-text" "GET /thumbs/" -HappiESelectedChildId "$CHILD_ID"
+      launch "$udid" "$device-07-gate-large-text" "/sync" -HappiESelectedChildId "$CHILD_ID" -uitest-parent-gate
+      xcrun simctl ui "$udid" content_size "$RESTORE_SIZE" >/dev/null 2>&1 || true
+      RESTORE_SIZE_UDID=""
+    else
+      echo "::warning::simctl can't set the content size; skipping large-text screens"
+    fi
   fi
 done
 

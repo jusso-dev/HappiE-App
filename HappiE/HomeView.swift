@@ -72,7 +72,7 @@ struct HomeView: View {
         if !resumable.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Continue watching")
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .scaledFont(size: 22, weight: .heavy, relativeTo: .title2)
                     .foregroundStyle(HTheme.ink)
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -90,7 +90,7 @@ struct HomeView: View {
     private func videoGrid(title: String, videos: [ManifestVideo]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .scaledFont(size: 22, weight: .heavy, relativeTo: .title2)
                 .foregroundStyle(HTheme.ink)
 
             if videos.isEmpty {
@@ -121,6 +121,7 @@ private struct HomeHeaderBar: View {
     let onOpenParentControls: () -> Void
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
 
@@ -135,10 +136,14 @@ private struct HomeHeaderBar: View {
                     HStack(spacing: 8) {
                         AvatarCircle(name: child.name, size: 34)
 
-                        Text(child.name)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(HTheme.ink)
-                            .lineLimit(1)
+                        // At accessibility sizes on iPhone the avatar alone
+                        // identifies the child (VoiceOver still reads the name).
+                        if !(isCompact && dynamicTypeSize.isAccessibilitySize) {
+                            Text(child.name)
+                                .scaledFont(size: 17, weight: .bold, relativeTo: .body)
+                                .foregroundStyle(HTheme.ink)
+                                .lineLimit(1)
+                        }
                     }
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Watching as \(child.name)")
@@ -180,7 +185,7 @@ struct SearchBar: View {
                 .foregroundStyle(HTheme.muted)
 
             TextField("Search videos", text: $text)
-                .font(.system(size: 19, weight: .medium, design: .rounded))
+                .scaledFont(size: 19, weight: .medium, relativeTo: .body)
                 .foregroundStyle(HTheme.ink)
                 .textFieldStyle(.plain)
                 .autocorrectionDisabled()
@@ -203,7 +208,7 @@ struct SearchBar: View {
             }
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(minHeight: 48)
         .background(HTheme.surface)
         .clipShape(Capsule())
     }
@@ -220,7 +225,7 @@ private struct OfflineBanner: View {
                 .foregroundStyle(HTheme.muted)
 
             Text("You're offline — showing saved videos")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .scaledFont(size: 16, weight: .semibold, relativeTo: .subheadline)
                 .foregroundStyle(HTheme.ink)
 
             Spacer()
@@ -232,7 +237,7 @@ private struct OfflineBanner: View {
             } label: {
                 Text("Retry")
                     .padding(.horizontal, 18)
-                    .frame(height: 40)
+                    .frame(minHeight: 44)
             }
             .buttonStyle(QuietButtonStyle())
         }
@@ -287,28 +292,23 @@ struct VideoCard: View {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(video.displayTitle)
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .scaledFont(size: 18, weight: .semibold, relativeTo: .body)
                         .foregroundStyle(HTheme.ink)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
 
-                    HStack(spacing: 6) {
-                        if !video.durationText.isEmpty {
-                            Text(video.durationText)
+                    // One row when it fits; stacked at large text sizes so
+                    // "Saved" and "Watched" never truncate.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            metadataItems(separated: true)
                         }
 
-                        if offlineState.isDownloaded {
-                            Text("•")
-                            Label("Saved", systemImage: "arrow.down.circle.fill")
-                                .foregroundStyle(HTheme.accent)
-                        }
-
-                        if let historyEntry, historyEntry.completed {
-                            Text("•")
-                            Label("Watched", systemImage: "checkmark")
+                        VStack(alignment: .leading, spacing: 2) {
+                            metadataItems(separated: false)
                         }
                     }
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .scaledFont(size: 14, weight: .medium, relativeTo: .footnote)
                     .foregroundStyle(HTheme.muted)
                 }
 
@@ -319,6 +319,24 @@ struct VideoCard: View {
             .padding(.horizontal, 4)
         }
         .opacity(isPlayable ? 1 : 0.45)
+    }
+
+    @ViewBuilder
+    private func metadataItems(separated: Bool) -> some View {
+        if !video.durationText.isEmpty {
+            Text(video.durationText)
+        }
+
+        if offlineState.isDownloaded {
+            if separated { Text("•") }
+            Label("Saved", systemImage: "arrow.down.circle.fill")
+                .foregroundStyle(HTheme.accentText)
+        }
+
+        if let historyEntry, historyEntry.completed {
+            if separated { Text("•") }
+            Label("Watched", systemImage: "checkmark")
+        }
     }
 }
 
@@ -511,11 +529,14 @@ struct DurationBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .bold))
+            .scaledFont(size: 13, weight: .bold, design: .default, relativeTo: .footnote)
             .monospacedDigit()
             .foregroundStyle(.white)
             .padding(.horizontal, 7)
-            .frame(height: 24)
+            .padding(.vertical, 2)
+            .frame(minHeight: 24)
+            // Sits on a thumbnail, so it grows only a little.
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
             .background(HTheme.badge)
             .clipShape(.rect(cornerRadius: 5))
     }
@@ -555,7 +576,7 @@ private struct ContinueWatchingCard: View {
                     .frame(width: 264, height: 148)
 
                 Text(entry.title)
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .scaledFont(size: 16, weight: .semibold, relativeTo: .subheadline)
                     .foregroundStyle(HTheme.ink)
                     .lineLimit(1)
                     .frame(width: 264, alignment: .leading)
@@ -617,11 +638,11 @@ struct EmptyStateView: View {
                 .foregroundStyle(HTheme.muted)
 
             Text(title)
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .scaledFont(size: 24, weight: .heavy, relativeTo: .title)
                 .foregroundStyle(HTheme.ink)
 
             Text(message)
-                .font(.system(size: 17, weight: .medium, design: .rounded))
+                .scaledFont(size: 17, weight: .medium, relativeTo: .body)
                 .foregroundStyle(HTheme.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)

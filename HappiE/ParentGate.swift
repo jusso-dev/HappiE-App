@@ -34,11 +34,11 @@ struct ParentGateView: View {
                     .foregroundStyle(HTheme.muted)
 
                 Text("Grown-ups only")
-                    .font(.system(size: 28, weight: .heavy, design: .rounded))
+                    .scaledFont(size: 28, weight: .heavy, relativeTo: .title)
                     .foregroundStyle(HTheme.ink)
 
                 Text("Type the numbers: **\(challenge.spelledOut)**")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .scaledFont(size: 20, weight: .medium, relativeTo: .title3)
                     .foregroundStyle(HTheme.muted)
                     .multilineTextAlignment(.center)
             }
@@ -46,7 +46,7 @@ struct ParentGateView: View {
             HStack(spacing: 14) {
                 ForEach(0..<3, id: \.self) { index in
                     Text(index < typed.count ? "\(typed[index])" : "")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .scaledFont(size: 30, weight: .heavy, relativeTo: .largeTitle)
                         .foregroundStyle(HTheme.ink)
                         .frame(width: 58, height: 68)
                         .background(HTheme.surface)
@@ -59,19 +59,22 @@ struct ParentGateView: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Entered \(typed.count) of 3 digits")
+            // Fixed-size digit boxes and keys only grow so far.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
             if attemptFailed {
                 Text("Not quite — try the new numbers.")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(HTheme.accent)
+                    .scaledFont(size: 16, weight: .semibold, relativeTo: .subheadline)
+                    .foregroundStyle(HTheme.accentText)
             }
 
             keypad
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
 
             Button("Cancel") {
                 dismiss()
             }
-            .font(.system(size: 18, weight: .semibold, design: .rounded))
+            .scaledFont(size: 18, weight: .semibold, relativeTo: .body)
             .foregroundStyle(HTheme.muted)
         }
         .padding(28)
@@ -111,7 +114,7 @@ struct ParentGateView: View {
             enter(digit)
         } label: {
             Text("\(digit)")
-                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .scaledFont(size: 26, weight: .bold, relativeTo: .title)
                 .foregroundStyle(HTheme.ink)
                 .frame(width: 76, height: 60)
                 .background(HTheme.surface)
