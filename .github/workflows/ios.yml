@@ -1,0 +1,59 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run regression tests
+        run: python3 -m unittest discover -s Tests -p 'test_*.py' -v
+
+  build:
+    name: Build and screenshot (iPhone + iPad)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E 'iPhone|iPad' | head -20
+
+      - name: Install ffmpeg
+        run: command -v ffmpeg || brew install ffmpeg
+
+      - name: Build, launch, and capture screens
+        env:
+          OUT_DIR: ${{ github.workspace }}/build/screenshots
+        run: bash scripts/ci-screenshots.sh
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: build/screenshots
+          if-no-files-found: warn

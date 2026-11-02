@@ -99,7 +99,10 @@ final class MediaPlayerManager: NSObject, ObservableObject, MediaPlayerSession, 
 
     func configurePictureInPicture(with playerLayer: AVPlayerLayer) {
         guard pictureInPictureController == nil, isPictureInPictureSupported else { return }
-        let controller = AVPictureInPictureController(playerLayer: playerLayer)
+        // The initializer is failable in current SDKs and non-failable in
+        // older ones; the explicit optional type compiles against both.
+        let pipController: AVPictureInPictureController? = AVPictureInPictureController(playerLayer: playerLayer)
+        guard let controller = pipController else { return }
         controller.delegate = self
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         pictureInPictureController = controller
