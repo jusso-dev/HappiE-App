@@ -187,6 +187,13 @@ struct VideoPlayerScreen: View {
             guard controller.isPlaying else { return }
             reportProgress(position: controller.currentTime)
         }
+        .onChange(of: controller.isPlaying) { _, isPlaying in
+            // Playback resumed from outside our controls (Control Center,
+            // the PiP window): let visible controls auto-hide again.
+            if isPlaying, controlsVisible {
+                scheduleControlsHide()
+            }
+        }
         .onChange(of: controller.endedEvent) {
             handleVideoEnded()
         }

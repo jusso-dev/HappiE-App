@@ -66,6 +66,7 @@ final class AppModel {
     /// Recovery postponed on backgrounding because PiP might start.
     private var isRecoveryDeferred = false
     private var pictureInPictureStartedInBackground = false
+    private var deferredRecoveryTask: Task<Void, Never>?
     var searchText = ""
     /// True when showing the locally cached library because the server is unreachable.
     var isOfflineMode = false
@@ -125,6 +126,8 @@ final class AppModel {
     /// changed (airplane mode toggled) while we were suspended.
     func handleBecameActive() {
         isInBackground = false
+        deferredRecoveryTask?.cancel()
+        deferredRecoveryTask = nil
         if isRecoveryDeferred {
             isRecoveryDeferred = false
             // Automatic PiP never started (e.g. turned off in Settings), so
@@ -471,6 +474,17 @@ final class AppModel {
             // Settled on return: closed unless PiP actually started.
             isRecoveryDeferred = true
             pictureInPictureStartedInBackground = false
+            // Background audio keeps the app running (e.g. screen lock with
+            // no PiP), so also stop it promptly instead of on return.
+            deferredRecoveryTask?.cancel()
+            deferredRecoveryTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                guard let self, !Task.isCancelled, isInBackground, isRecoveryDeferred,
+                      !pictureInPictureStartedInBackground
+                else { return }
+                isRecoveryDeferred = false
+                playbackItem = nil
+            }
         case .inPictureInPicture:
             isRecoveryDeferred = true
             pictureInPictureStartedInBackground = true

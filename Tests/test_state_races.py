@@ -67,7 +67,11 @@ class StateRaceRegressionTests(unittest.TestCase):
         close = model.split("func closePlayer()", 1)[1].split("}", 1)[0]
 
         self.assertIn("case .stops:\n            playbackItem = nil", recover)
-        self.assertNotIn("playbackItem = nil", recover.split("case .stops:", 1)[1].split("case .mayStart", 1)[1])
+        may_start = recover.split("case .mayStartPictureInPicture:", 1)[1].split("case .inPictureInPicture:", 1)[0]
+        in_pip = recover.split("case .inPictureInPicture:", 1)[1]
+        # PiP (or its chance to start) keeps the player; any close is deferred.
+        self.assertNotIn("playbackItem = nil", in_pip)
+        self.assertNotIn("playbackItem = nil", may_start.split("Task {", 1)[0])
         self.assertIn("playerBackgroundPlayback = .stops", close)
         self.assertIn("onBackgroundPlaybackChange", source("ContentView.swift"))
 
@@ -80,6 +84,13 @@ class StateRaceRegressionTests(unittest.TestCase):
         self.assertIn("if isRecoveryDeferred", active)
         self.assertIn("if !pictureInPictureStartedInBackground", active)
         self.assertIn("playbackItem = nil", active)
+
+        # With background audio the app keeps running, so a grace period
+        # also stops playback that PiP didn't pick up.
+        may_start = model.split("case .mayStartPictureInPicture:", 1)[1].split("case .inPictureInPicture:", 1)[0]
+        self.assertIn("Task.sleep", may_start)
+        self.assertIn("!pictureInPictureStartedInBackground", may_start)
+        self.assertIn("deferredRecoveryTask?.cancel()", active)
 
     def test_background_continuation_follows_the_real_pip_lifecycle(self):
         player = source("PlayerView.swift")
